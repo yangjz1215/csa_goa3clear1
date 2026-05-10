@@ -44,8 +44,8 @@ colors = [
     0.6350, 0.0780, 0.1840
 ];
 
-algorithms = {'cSA_GOA', 'PSO', 'GA', 'GOA', 'cSA', 'GWO'};
-labels = {'cSA-GOA (Proposed)', 'PSO', 'GA', 'GOA', 'cSA', 'GWO'};
+algorithms = {'cSA_GOA', 'PSO', 'GA', 'GOA', 'cSA', 'NSGA2'};
+labels = {'cSA-GOA (Proposed)', 'PSO', 'GA', 'GOA', 'cSA', 'NSGA-II'};
 marker_styles = {'*', 'o', 's', '^', 'd', 'v'};
 sizes = [80, 40, 40, 40, 40, 40];
 n_algs = length(algorithms);
@@ -425,4 +425,56 @@ saveas(fig_spread, fullfile(output_dir, 'comparison_spread_boxplot.fig'));
 close(fig_spread);
 
 fprintf('IGD and Spread charts saved to %s\n', output_dir);
+
+if isfield(results, 'wilcoxon_table') && ~isempty(results.wilcoxon_table)
+    fprintf('正在生成 Wilcoxon 统计显著性表格...\n');
+    plotWilcoxonTable(results.wilcoxon_table, output_dir, scene);
+end
+end
+
+function plotWilcoxonTable(wilcoxon_table, output_dir, scene)
+    n_rows = size(wilcoxon_table, 1);
+
+    csv_file = fullfile(output_dir, 'wilcoxon_test_results.csv');
+    fid = fopen(csv_file, 'w');
+    fprintf(fid, 'Comparison,p-value,h (p<0.05),Significant\n');
+    for r = 1:n_rows
+        fprintf(fid, '%s,%.6f,%d,%s\n', ...
+            wilcoxon_table{r, 1}, wilcoxon_table{r, 2}, wilcoxon_table{r, 3}, wilcoxon_table{r, 4});
+    end
+    fclose(fid);
+    fprintf('  Wilcoxon 检验结果已导出至: %s\n', csv_file);
+
+    fig_w = figure('Position', [200, 200, 750, 180 + n_rows * 30]);
+    set(gcf, 'Color', 'w');
+
+    col_names = {'Comparison', 'p-value', 'Significant (p<0.05)'};
+    table_data = cell(n_rows, 3);
+    for r = 1:n_rows
+        table_data{r, 1} = wilcoxon_table{r, 1};
+        table_data{r, 2} = sprintf('%.6f', wilcoxon_table{r, 2});
+        if ~isnan(wilcoxon_table{r, 3}) && wilcoxon_table{r, 3} == 1
+            table_data{r, 3} = 'Yes \checkmark';
+        elseif ~isnan(wilcoxon_table{r, 3})
+            table_data{r, 3} = 'No';
+        else
+            table_data{r, 3} = 'N/A';
+        end
+    end
+
+    t = uitable('Data', table_data, 'ColumnName', col_names, ...
+        'Position', [20, 20, 710, 140 + n_rows * 30], ...
+        'FontName', 'Times New Roman', 'FontSize', 12, ...
+        'ColumnWidth', {350, 120, 180}, ...
+        'RowName', []);
+
+    title_str = ['Wilcoxon Rank Sum Test on HV (cSA-GOA vs. Baselines) - ', scene];
+    annotation('textbox', [0.15, 0.88, 0.7, 0.06], 'String', title_str, ...
+        'FontWeight', 'bold', 'FontSize', 13, 'FontName', 'Times New Roman', ...
+        'EdgeColor', 'none', 'HorizontalAlignment', 'center');
+
+    saveas(fig_w, fullfile(output_dir, 'wilcoxon_table.fig'));
+    exportgraphics(fig_w, fullfile(output_dir, 'wilcoxon_table.png'), 'Resolution', 300);
+    close(fig_w);
+    fprintf('  Wilcoxon 统计表格已保存至: %s\n', output_dir);
 end

@@ -32,7 +32,7 @@ function results = run_comparison_para(varargin)
         'GA', 'GA (Genetic Algorithm)';
         'GOA', 'GOA (Grasshopper Optimization)';
         'cSA', 'cSA (Compact Sine Algorithm)';
-        'GWO', 'GWO (Grey Wolf Optimizer)'
+        'NSGA2', 'NSGA-II (Non-dominated Sorting GA)'
     };
 
     if isempty(gcp('nocreate'))
@@ -95,9 +95,9 @@ function results = run_comparison_para(varargin)
                 case 'cSA'
                     [~, bestUAV, cg_curve, ~, pareto_archive] = ...
                         cSA_UAV(N_User, User, N_RRH, RRH, RRH_type, N_UAV, UAV_type, Ub, Lb, params, priorities);
-                case 'GWO'
+                case 'NSGA2'
                     [~, bestUAV, cg_curve, ~, pareto_archive] = ...
-                        GWO_UAV(N_User, User, N_RRH, RRH, RRH_type, N_UAV, UAV_type, Ub, Lb, params, priorities);
+                        NSGA2_UAV(N_User, User, N_RRH, RRH, RRH_type, N_UAV, UAV_type, Ub, Lb, params, priorities);
             end
 
             runtimes(run) = toc(t_start);
@@ -197,6 +197,10 @@ function results = run_comparison_para(varargin)
     end
 
     results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV, params, n_runs, '对比实验');
+
+    fprintf('\n========== Wilcoxon Rank Sum Test on HV (cSA-GOA vs. Others) ==========\n');
+    wilcoxon_table = computeWilcoxonTable(results, algorithms);
+    results.wilcoxon_table = wilcoxon_table;
 
     results_file = fullfile(project_dir, 'experiments', ['comparison_results_para_', map_name, '_', datestr(now, 'yyyymmdd_HHMMSS'), '.mat']);
     save(results_file, 'results', 'map_data', 'params');
@@ -451,4 +455,64 @@ function pf = extractNonDominated(points)
         end
     end
     pf = points(~is_dominated, :);
+end
+
+function wilcoxon_table = computeWilcoxonTable(results, algorithms)
+    n_algs = size(algorithms, 1);
+    alg_names = algorithms(:, 1);
+    alg_labels = algorithms(:, 2);
+
+    ref_name = 'cSA_GOA';
+    if ~isfield(results, ref_name) || ~isfield(results.(ref_name), 'hv_values')
+        warning('cSA_GOA HV data not found, skipping Wilcoxon test.');
+        wilcoxon_table = [];
+        return;
+    end
+
+    ref_hv = results.(ref_name).hv_values(:);
+    ref_hv = ref_hv(~isnan(ref_hv));
+
+    fprintf('%-40s | %-12s | %-12s | %-14s\n', 'Comparison', 'p-value', 'h (p<0.05)', 'Significant');
+    fprintf('%s\n', repmat('-', 1, 85));
+
+    wilcoxon_table = cell(n_algs, 5);
+    row = 0;
+
+    for a = 1:n_algs
+        alg_name = alg_names{a};
+        if strcmp(alg_name, ref_name), continue; end
+        if ~isfield(results, alg_name) || ~isfield(results.(alg_name), 'hv_values'), continue; end
+
+        cmp_hv = results.(alg_name).hv_values(:);
+        cmp_hv = cmp_hv(~isnan(cmp_hv));
+
+        if length(ref_hv) < 3 || length(cmp_hv) < 3
+            p_val = NaN;
+            h = NaN;
+        else
+            [p_val, h] = wilcoxon_test(ref_hv, cmp_hv);
+        end
+
+        sig_str = '';
+        if ~isnan(h) && h == 1
+            sig_str = 'Yes (p<0.05)';
+        elseif ~isnan(h)
+            sig_str = 'No (p>=0.05)';
+        else
+            sig_str = 'N/A';
+        end
+
+        row = row + 1;
+        wilcoxon_table{row, 1} = ['cSA-GOA vs. ', alg_labels{a}];
+        wilcoxon_table{row, 2} = p_val;
+        wilcoxon_table{row, 3} = h;
+        wilcoxon_table{row, 4} = sig_str;
+        wilcoxon_table{row, 5} = alg_name;
+
+        fprintf('%-40s | %-12.6f | %-12d | %-14s\n', ...
+            wilcoxon_table{row, 1}, p_val, h, sig_str);
+    end
+
+    wilcoxon_table = wilcoxon_table(1:row, :);
+    fprintf('%s\n', repmat('-', 1, 85));
 end
