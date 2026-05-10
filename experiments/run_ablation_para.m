@@ -26,11 +26,12 @@ function results = run_ablation_para(varargin)
     fprintf('说明: 迭代日志跟踪当前全局标量最优解；最终汇总采用 Pareto 档案中 Utility 最大解。\n');
 
     variants = {
-        'proposed',     'Proposed cSA-GOA (full)';
-        'no_pareto',    'w/o Pareto Leader';
-        'no_subpop',    'w/o Multi-Subpopulation';
-        'no_goa',       'w/o GOA (repulsion + turn)';
-        'no_migration', 'w/o Elite Migration';
+        'proposed',              'Proposed cSA-GOA (full)';
+        'no_pareto',             'w/o Pareto Leader';
+        'no_subpop',             'w/o Multi-Subpopulation';
+        'no_goa',                'w/o GOA (repulsion + turn)';
+        'no_migration',          'w/o Elite Migration';
+        'no_pv_interpolation',   'w/o PV Interpolation Exchange';
     };
     fprintf('消融实验: 硬消融变体共 %d 个\n', size(variants, 1));
 

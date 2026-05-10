@@ -16,6 +16,15 @@ end
 if ~isfield(params, 'enable_multi_subpop')
     params.enable_multi_subpop = true;
 end
+if ~isfield(params, 'enable_pv_interpolation')
+    params.enable_pv_interpolation = true;
+end
+if ~isfield(params, 'pv_interpolation_interval') || isempty(params.pv_interpolation_interval)
+    params.pv_interpolation_interval = 10;
+end
+if ~isfield(params, 'pv_interpolation_count') || isempty(params.pv_interpolation_count)
+    params.pv_interpolation_count = 3;
+end
 
 params.RRH = RRH;
 params.RRH_type = RRH_type;
@@ -288,6 +297,19 @@ for iter = 2:params.FES_max
 
     if mod(iter, 5) == 0 || iter == params.FES_max
         pareto_updated_this_iter = false;
+
+        if params.enable_pv_interpolation && params.enable_multi_subpop && iter > 20 && mod(iter, params.pv_interpolation_interval) == 0
+            mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, params.D_UU, params.D_RU, params.pv_interpolation_count);
+            for mc = 1:length(mixed_candidates)
+                cand_pos = mixed_candidates(mc).UAV_pos;
+                [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(cand_pos, User, priorities, params);
+                [pareto_archive, is_updated] = updateParetoArchive3D(pareto_archive, cand_pos, cand_util, cand_lat, cand_nrg);
+                if is_updated
+                    pareto_updated_this_iter = true;
+                end
+            end
+        end
+
         for g = 1:3
             for i = 1:size(mem_matrix{g}, 1)
                 candidate = squeeze(mem_matrix{g}(i, :, :));

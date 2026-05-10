@@ -13,6 +13,15 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
     if ~isfield(params, 'migration_stagnation_iters') || isempty(params.migration_stagnation_iters)
         params.migration_stagnation_iters = 20;
     end
+    if ~isfield(params, 'enable_pv_interpolation')
+        params.enable_pv_interpolation = true;
+    end
+    if ~isfield(params, 'pv_interpolation_interval') || isempty(params.pv_interpolation_interval)
+        params.pv_interpolation_interval = 10;
+    end
+    if ~isfield(params, 'pv_interpolation_count') || isempty(params.pv_interpolation_count)
+        params.pv_interpolation_count = 3;
+    end
     params = configureAblationVariant(params, variant);
 
     subpops = initSubpopulations(N_UAV, User, RRH, priorities, params.subpop_params, Ub, Lb, params.cover_radius, params.D_RU);
@@ -235,6 +244,15 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
         end
 
         if mod(iter, 5) == 0 || iter == params.FES_max
+            if params.enable_pv_interpolation && params.enable_multi_subpop && iter > 20 && mod(iter, params.pv_interpolation_interval) == 0
+                mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, params.D_UU, params.D_RU, params.pv_interpolation_count);
+                for mc = 1:length(mixed_candidates)
+                    cand_pos = mixed_candidates(mc).UAV_pos;
+                    [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(cand_pos, User, priorities, params);
+                    [pareto_archive, ~] = updateParetoArchive3D(pareto_archive, cand_pos, cand_util, cand_lat, cand_nrg);
+                end
+            end
+
             for g = 1:n_subpops
                 for i = 1:size(mem_matrix{g}, 1)
                     candidate = squeeze(mem_matrix{g}(i, :, :));
@@ -311,6 +329,7 @@ function params = configureAblationVariant(params, variant)
     params.enable_elite_migration = true;
     params.enable_random_global_leader = false;
     params.enable_archive_final_selection = true;
+    params.enable_pv_interpolation = true;
 
     switch variant
         case 'proposed'
@@ -319,6 +338,7 @@ function params = configureAblationVariant(params, variant)
         case {'no_subpop', 'no_multi_subpop'}
             params.enable_multi_subpop = false;
             params.enable_elite_migration = false;
+            params.enable_pv_interpolation = false;
         case 'no_goa'
             params.enable_goa_repulsion = false;
             params.enable_goa_turn = false;
@@ -328,6 +348,8 @@ function params = configureAblationVariant(params, variant)
             params.enable_goa_turn = false;
         case {'no_migration', 'no_elite_migration'}
             params.enable_elite_migration = false;
+        case {'no_pv_interpolation', 'no_pv_exchange'}
+            params.enable_pv_interpolation = false;
         otherwise
             error('Unknown ablation variant: %s', variant);
     end

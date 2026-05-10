@@ -1,4 +1,4 @@
-﻿function results = run_ablation(varargin)
+function results = run_ablation(varargin)
     fprintf('========== 娑堣瀺瀹為獙寮€濮?==========\n');
 
     script_dir = fileparts(mfilename('fullpath'));
@@ -113,7 +113,8 @@
         'no_pareto', 'Hard w/o Pareto: scalar leader only, no archive final selection';
         'no_subpop', 'Hard w/o multi-subpop: single pop, no K×3, no migration';
         'no_goa', 'Hard w/o GOA: raw sampling candidates, no GOA shape, no goaTurn';
-        'no_migration', 'Hard w/o elite migration'
+        'no_migration', 'Hard w/o elite migration';
+        'no_pv_interpolation', 'Hard w/o PV Interpolation Exchange'
     };
 
     reference_point = [1.0, 100000];
