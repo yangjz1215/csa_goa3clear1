@@ -1,0 +1,17 @@
+# MATLAB generated files
+*.mat
+*.m~
+*.asv
+
+# Experiment results (large binary files)
+experiments/*.mat
+experiments/*.csv
+experiments/*.log
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+Thumbs.db
+.DS_Store
