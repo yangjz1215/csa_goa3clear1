@@ -5,9 +5,9 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = NSGA2_UAV(
     end
 
     if isfield(params, 'K')
-        pop_size = params.K * 3;
+        pop_size = params.K;
     else
-        pop_size = 120;
+        pop_size = 40;
     end
 
     if ~isfield(params, 'enable_bilevel'); params.enable_bilevel = true; end
@@ -75,12 +75,15 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = NSGA2_UAV(
     end
     cg_curve(1) = best_util_so_far;
 
+    [fronts, rank] = fastNonDominatedSort(objectives);
+    crowd = crowdingDistance(objectives, fronts);
+
     for iter = 2:max_iter
         offspring = zeros(pop_size, n_vars);
 
         for i = 1:2:pop_size
-            p1_idx = binaryTournamentNSGA2(objectives);
-            p2_idx = binaryTournamentNSGA2(objectives);
+            p1_idx = binaryTournament(rank, crowd);
+            p2_idx = binaryTournament(rank, crowd);
 
             parent1 = population(p1_idx, :);
             parent2 = population(p2_idx, :);
@@ -110,15 +113,13 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = NSGA2_UAV(
             offspring(i, :) = max(0, min(1000, offspring(i, :)));
         end
 
-        combined_pop = [population; offspring];
-        combined_obj = zeros(2 * pop_size, n_obj);
-
-        for i = 1:(2 * pop_size)
-            uav_pos = reshape(combined_pop(i, :), N_UAV, 2);
+        off_obj = zeros(pop_size, n_obj);
+        for i = 1:pop_size
+            uav_pos = reshape(offspring(i, :), N_UAV, 2);
             [util, lat, nrg, ~] = calcMEC_Objectives(uav_pos, User, priorities, params);
-            combined_obj(i, 1) = -util;
-            combined_obj(i, 2) = lat;
-            combined_obj(i, 3) = nrg;
+            off_obj(i, 1) = -util;
+            off_obj(i, 2) = lat;
+            off_obj(i, 3) = nrg;
 
             pareto_archive = updateParetoArchive3D(pareto_archive, uav_pos, util, lat, nrg);
 
@@ -129,7 +130,12 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = NSGA2_UAV(
             end
         end
 
+        combined_pop = [population; offspring];
+        combined_obj = [objectives; off_obj];
+
         [population, objectives] = nsga2Selection(combined_pop, combined_obj, pop_size);
+        [fronts, rank] = fastNonDominatedSort(objectives);
+        crowd = crowdingDistance(objectives, fronts);
 
         cg_curve(iter) = best_util_so_far;
 
@@ -149,18 +155,10 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = NSGA2_UAV(
     end
 end
 
-function idx = binaryTournamentNSGA2(objectives)
-    n = size(objectives, 1);
+function idx = binaryTournament(rank, crowd)
+    n = length(rank);
     i1 = randi(n);
     i2 = randi(n);
-
-    [fronts, ~] = fastNonDominatedSort(objectives);
-    rank = zeros(n, 1);
-    for f = 1:length(fronts)
-        rank(fronts{f}) = f;
-    end
-
-    crowd = crowdingDistance(objectives, fronts);
 
     if rank(i1) < rank(i2)
         idx = i1;
@@ -180,11 +178,12 @@ function [fronts, rank] = fastNonDominatedSort(objectives)
     dominates_list = cell(n, 1);
 
     for i = 1:n
-        for j = 1:n
-            if i == j, continue; end
-            if dominates(objectives(i, :), objectives(j, :))
+        for j = i+1:n
+            if all(objectives(i, :) <= objectives(j, :)) && any(objectives(i, :) < objectives(j, :))
                 dominates_list{i} = [dominates_list{i}, j];
-            elseif dominates(objectives(j, :), objectives(i, :))
+                dominated_count(j) = dominated_count(j) + 1;
+            elseif all(objectives(j, :) <= objectives(i, :)) && any(objectives(j, :) < objectives(i, :))
+                dominates_list{j} = [dominates_list{j}, i];
                 dominated_count(i) = dominated_count(i) + 1;
             end
         end
@@ -210,10 +209,6 @@ function [fronts, rank] = fastNonDominatedSort(objectives)
     end
 end
 
-function result = dominates(a, b)
-    result = all(a <= b) && any(a < b);
-end
-
 function crowd = crowdingDistance(objectives, fronts)
     n = size(objectives, 1);
     m = size(objectives, 2);
@@ -222,6 +217,11 @@ function crowd = crowdingDistance(objectives, fronts)
     for f = 1:length(fronts)
         front = fronts{f};
         nf = length(front);
+
+        if nf < 3
+            crowd(front) = inf;
+            continue;
+        end
 
         for obj = 1:m
             [~, sorted_idx] = sort(objectives(front, obj));
@@ -242,7 +242,7 @@ function crowd = crowdingDistance(objectives, fronts)
 end
 
 function [new_pop, new_obj] = nsga2Selection(combined_pop, combined_obj, pop_size)
-    [fronts, ~] = fastNonDominatedSort(combined_obj);
+    [fronts, rank] = fastNonDominatedSort(combined_obj);
     crowd = crowdingDistance(combined_obj, fronts);
 
     new_pop = zeros(pop_size, size(combined_pop, 2));
@@ -250,7 +250,7 @@ function [new_pop, new_obj] = nsga2Selection(combined_pop, combined_obj, pop_siz
     count = 0;
     f = 1;
 
-    while count + length(fronts{f}) <= pop_size
+    while f <= length(fronts) && count + length(fronts{f}) <= pop_size
         front = fronts{f};
         new_pop(count+1:count+length(front), :) = combined_pop(front, :);
         new_obj(count+1:count+length(front), :) = combined_obj(front, :);
@@ -258,7 +258,7 @@ function [new_pop, new_obj] = nsga2Selection(combined_pop, combined_obj, pop_siz
         f = f + 1;
     end
 
-    if count < pop_size
+    if count < pop_size && f <= length(fronts)
         last_front = fronts{f};
         [~, sorted_idx] = sort(crowd(last_front), 'descend');
         remaining = pop_size - count;
