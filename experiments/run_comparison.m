@@ -427,7 +427,7 @@ function wilcoxon_table = computeWilcoxonTableSerial(results, algorithms)
         wilcoxon_table{row, 4} = sig_str;
         wilcoxon_table{row, 5} = alg_name;
 
-        fprintf('%-40s | %-12.6f | %-12d | %-14s\n', ...
+        fprintf('%-40s | %-12.2e | %-12d | %-14s\n', ...
             wilcoxon_table{row, 1}, p_val, h, sig_str);
     end
 

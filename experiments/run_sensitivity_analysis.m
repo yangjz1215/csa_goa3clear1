@@ -153,8 +153,8 @@ figure('Position', [100, 100, 900, 400], 'Name', 'Parameter Sensitivity Analysis
 
 % 图 1: K 值的敏感性
 subplot(1, 2, 1);
-mean_K = nanmean(hv_results_K, 2);
-std_K = nanstd(hv_results_K, 0, 2);
+mean_K = mean(hv_results_K, 2, 'omitnan');
+std_K = std(hv_results_K, 0, 2, 'omitnan');
 errorbar(1:3, mean_K, std_K, '-o', 'LineWidth', 2, 'MarkerSize', 8, 'Color', '#D95319', 'MarkerFaceColor', '#D95319');
 set(gca, 'XTick', 1:3, 'XTickLabel', K_labels, 'FontSize', 11);
 xlim([0.5, 3.5]);
@@ -186,7 +186,7 @@ max_hv_k = max(mean_K);
 min_hv_k = min(mean_K);
 fluctuation_k = (max_hv_k - min_hv_k) / max_hv_k * 100;
 
-mean_sigma = nanmean(hv_results_Sigma, 2);
+mean_sigma = mean(hv_results_Sigma, 2, 'omitnan');
 max_hv_sigma = max(mean_sigma);
 min_hv_sigma = min(mean_sigma);
 fluctuation_sigma = (max_hv_sigma - min_hv_sigma) / max_hv_sigma * 100;

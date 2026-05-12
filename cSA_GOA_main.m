@@ -20,10 +20,19 @@ if ~isfield(params, 'enable_pv_interpolation')
     params.enable_pv_interpolation = true;
 end
 if ~isfield(params, 'pv_interpolation_interval') || isempty(params.pv_interpolation_interval)
-    params.pv_interpolation_interval = 10;
+    params.pv_interpolation_interval = 15;
 end
 if ~isfield(params, 'pv_interpolation_count') || isempty(params.pv_interpolation_count)
-    params.pv_interpolation_count = 3;
+    params.pv_interpolation_count = 2;
+end
+if ~isfield(params, 'pv_interpolation_start_frac') || isempty(params.pv_interpolation_start_frac)
+    params.pv_interpolation_start_frac = 0.32;
+end
+if ~isfield(params, 'pv_interpolation_prob') || isempty(params.pv_interpolation_prob)
+    params.pv_interpolation_prob = 0.72;
+end
+if ~isfield(params, 'pv_interpolation_min_archive') || isempty(params.pv_interpolation_min_archive)
+    params.pv_interpolation_min_archive = 10;
 end
 
 params.RRH = RRH;
@@ -298,7 +307,12 @@ for iter = 2:params.FES_max
     if mod(iter, 5) == 0 || iter == params.FES_max
         pareto_updated_this_iter = false;
 
-        if params.enable_pv_interpolation && params.enable_multi_subpop && iter > 20 && mod(iter, params.pv_interpolation_interval) == 0
+        iter_min_pv = max(20, round(params.pv_interpolation_start_frac * params.FES_max));
+        do_pv_mix = params.enable_pv_interpolation && params.enable_multi_subpop && ...
+            iter >= iter_min_pv && mod(iter, params.pv_interpolation_interval) == 0 && ...
+            length(pareto_archive) >= params.pv_interpolation_min_archive && ...
+            rand <= params.pv_interpolation_prob;
+        if do_pv_mix
             mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, params.D_UU, params.D_RU, params.pv_interpolation_count);
             for mc = 1:length(mixed_candidates)
                 cand_pos = mixed_candidates(mc).UAV_pos;

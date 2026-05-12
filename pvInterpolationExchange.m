@@ -9,7 +9,8 @@ function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH,
         return;
     end
 
-    pairs = [1, 2; 2, 3; 1, 3];
+    % Prefer G2–G3 (时延–能耗) and G1–G3 (效用–能耗) before G1–G2，利于折中区域与 IGD
+    pairs = [2, 3; 1, 3; 1, 2];
     mixed_candidates = [];
 
     for p = 1:size(pairs, 1)

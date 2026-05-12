@@ -118,8 +118,8 @@ for v = 1:n_vars
     variant = variants{v};
     if isfield(results, variant) && isfield(results.(variant), 'hv_values')
         vals = results.(variant).hv_values;
-        hv_means(v) = nanmean(vals);
-        hv_stds(v) = nanstd(vals);
+        hv_means(v) = mean(vals, 'omitnan');
+        hv_stds(v) = std(vals, 0, 'omitnan');
     end
 end
 % 鉁?淇鐐?2锛氬皢鍐欐鐨?5 鍏ㄩ儴鏇挎崲涓哄姩鎬佺殑 n_vars
@@ -247,7 +247,7 @@ for v = 1:n_vars
             p_values(v) = NaN;
             h_stats(v) = NaN;
         end
-        mean_improvement(v) = (nanmean(proposed_hv) - nanmean(variant_hv)) / nanmean(variant_hv) * 100;
+        mean_improvement(v) = (mean(proposed_hv, 'omitnan') - mean(variant_hv, 'omitnan')) / mean(variant_hv, 'omitnan') * 100;
     else
         p_values(v) = NaN; h_stats(v) = NaN; mean_improvement(v) = NaN;
     end
@@ -271,8 +271,8 @@ table_data = cell(n_vars, 5);
 for v = 1:n_vars
     variant = variants{v};
     if isfield(results, variant)
-        hv_mean = nanmean(results.(variant).hv_values);
-        hv_std = nanstd(results.(variant).hv_values);
+        hv_mean = mean(results.(variant).hv_values, 'omitnan');
+        hv_std = std(results.(variant).hv_values, 0, 'omitnan');
         table_data{v, 1} = variant_labels{v};
         table_data{v, 2} = sprintf('%.4f +/- %.4f', hv_mean, hv_std);
         table_data{v, 3} = sprintf('%.4e', p_values(v));
@@ -477,7 +477,7 @@ function [p, h] = wilcoxon_signed_rank_selfcontained(x, y)
     sigma_w = sqrt(n * (n + 1) * (2 * n + 1) / 6);
     if sigma_w > 0
         z = (abs(W) - 0.5) / sigma_w;
-        p = 2 * (1 - normcdf(z));
+        p = 2 * (1 - norm_cdf_standard(z));
     else
         p = 1;
     end

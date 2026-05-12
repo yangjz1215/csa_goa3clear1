@@ -439,7 +439,7 @@ function plotWilcoxonTable(wilcoxon_table, output_dir, scene)
     fid = fopen(csv_file, 'w');
     fprintf(fid, 'Comparison,p-value,h (p<0.05),Significant\n');
     for r = 1:n_rows
-        fprintf(fid, '%s,%.6f,%d,%s\n', ...
+        fprintf(fid, '%s,%.2e,%d,%s\n', ...
             wilcoxon_table{r, 1}, wilcoxon_table{r, 2}, wilcoxon_table{r, 3}, wilcoxon_table{r, 4});
     end
     fclose(fid);
@@ -452,7 +452,7 @@ function plotWilcoxonTable(wilcoxon_table, output_dir, scene)
     table_data = cell(n_rows, 3);
     for r = 1:n_rows
         table_data{r, 1} = wilcoxon_table{r, 1};
-        table_data{r, 2} = sprintf('%.6f', wilcoxon_table{r, 2});
+        table_data{r, 2} = format_pvalue(wilcoxon_table{r, 2});
         if ~isnan(wilcoxon_table{r, 3}) && wilcoxon_table{r, 3} == 1
             table_data{r, 3} = 'Yes \checkmark';
         elseif ~isnan(wilcoxon_table{r, 3})
@@ -477,4 +477,16 @@ function plotWilcoxonTable(wilcoxon_table, output_dir, scene)
     exportgraphics(fig_w, fullfile(output_dir, 'wilcoxon_table.png'), 'Resolution', 300);
     close(fig_w);
     fprintf('  Wilcoxon 统计表格已保存至: %s\n', output_dir);
+end
+
+function s = format_pvalue(p)
+    if isnan(p)
+        s = 'N/A';
+    elseif p == 0
+        s = '< 1.00e-300';
+    elseif p < 0.001
+        s = sprintf('%.2e', p);
+    else
+        s = sprintf('%.6f', p);
+    end
 end

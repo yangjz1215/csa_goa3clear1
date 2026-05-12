@@ -4,153 +4,136 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = cSA_UAV(N_
         max_iter = params.FES_max;
     end
 
-    params.RRH = RRH;
-
-    lamda = 10;
-    Np = 300;
-
-    mu = zeros(N_UAV, 2);
-    sicma = lamda * ones(N_UAV, 2);
-
-    center_point = [500, 500];
-    jitter = 10;
-
-    population = zeros(N_UAV, 2);
-    for j = 1:N_UAV
-        valid = false;
-        attempts = 0;
-        while ~valid && attempts < 100
-            attempts = attempts + 1;
-            init_x = center_point(1) + jitter * randn();
-            init_y = center_point(2) + jitter * randn();
-            pos = [max(Lb(1), min(Ub(1), init_x)), max(Lb(2), min(Ub(2), init_y))];
-
-            dist_uu_ok = true;
-            for k = 1:j-1
-                if norm(pos - population(k,:)) < params.D_UU
-                    dist_uu_ok = false; break;
-                end
-            end
-            dist_ru_ok = true;
-            for k = 1:size(RRH,1)
-                if norm(pos - RRH(k,:)) < params.D_RU
-                    dist_ru_ok = false; break;
-                end
-            end
-
-            if dist_uu_ok && dist_ru_ok
-                population(j,:) = pos;
-                valid = true;
-            end
-        end
-        if ~valid
-            population(j,:) = pos;
-        end
+    if isfield(params, 'K')
+        pop_size = params.K * 3;
+    else
+        pop_size = 120;
     end
 
-    center_point = repmat([500, 500], N_UAV, 1);
-    fly_dist = sqrt(sum((population - center_point).^2, 2));
-    fly_energy = params.k_move * fly_dist;
-    E_curr = max(0, params.E_max - fly_energy);
+    if ~isfield(params, 'enable_bilevel'); params.enable_bilevel = true; end
+    if ~isfield(params, 'B_total'); params.B_total = 20e6; end
+    if ~isfield(params, 'F_total'); params.F_total = 10e9; end
+    if ~isfield(params, 'max_latency'); params.max_latency = 1.0; end
+    if ~isfield(params, 'kappa'); params.kappa = 1e-27; end
+    if ~isfield(params, 'P_tx'); params.P_tx = 1; end
+    if ~isfield(params, 'noise'); params.noise = 1e-13; end
+    if ~isfield(params, 'RRH_radius'); params.RRH_radius = 120; end
+    params.RRH = RRH;
 
-    [best_fit, ~, ~, ~] = calcFitness(population, User, priorities, E_curr, params.E_max, params.k_move, 1, ...
-        params.subpop_params, N_UAV, params.cover_radius, RRH, 0.5, N_RRH, RRH_type, UAV_type, params);
-    bestUAV = population;
+    n_vars = N_UAV * 2;
+    center_point = [500, 500];
+    jitter = 10;
+    Np = pop_size;
 
-    cg_curve = zeros(1, max_iter);
-    
-    % 使用物理指标计算初始真实效用并存入归档
-    [best_util, best_lat, best_nrg, ~] = calcMEC_Objectives(bestUAV, User, priorities, params);
-    cg_curve(1) = best_util;
+    population = zeros(pop_size, n_vars);
+    fitness_pop = zeros(pop_size, 1);
+    mu = zeros(pop_size, n_vars);
+    sigma = ones(pop_size, n_vars);
 
+    E_remaining = params.E_max * ones(N_UAV, 1);
     pareto_archive = struct('UAV_pos', {}, 'Utility', {}, 'Latency', {}, 'Energy', {});
-    pareto_archive = updateParetoArchive3D(pareto_archive, bestUAV, best_util, best_lat, best_nrg);
 
-    iter_count = 0;
-
-    while iter_count < max_iter
-        a = 2 - iter_count * (2 / max_iter);
-
-        new_population = zeros(N_UAV, 2);
+    for i = 1:pop_size
         for j = 1:N_UAV
-            new_population(j, 1) = Lb(1) + rand() * (Ub(1) - Lb(1));
-            new_population(j, 2) = Lb(2) + rand() * (Ub(2) - Lb(2));
+            init_x = center_point(1) + jitter * randn();
+            init_y = center_point(2) + jitter * randn();
+            population(i, (j-1)*2+1) = max(Lb(1), min(Ub(1), init_x));
+            population(i, (j-1)*2+2) = max(Lb(2), min(Ub(2), init_y));
         end
 
-        for i = 1:N_UAV
-            for j = 1:2
+        uav_pos = reshape(population(i, :), N_UAV, 2);
+        if ~checkConstraints(uav_pos, params.D_UU, params.D_RU, RRH)
+            uav_pos = enforceConstraints(uav_pos, params.D_UU, params.D_RU, RRH);
+            population(i, :) = reshape(uav_pos, 1, N_UAV * 2);
+        end
+
+        center_point_rep = repmat([500, 500], N_UAV, 1);
+        fly_dist = sqrt(sum((uav_pos - center_point_rep).^2, 2));
+        fly_energy = params.k_move * fly_dist;
+        E_curr = max(0, params.E_max - fly_energy);
+
+        [fitness, ~, ~, ~] = calcFitness(uav_pos, User, priorities, E_curr, params.E_max, params.k_move, 1, ...
+            params.subpop_params, N_UAV, params.cover_radius, RRH, 0.5, N_RRH, RRH_type, UAV_type, params);
+        fitness_pop(i) = fitness;
+
+        [cand_util, cand_lat, cand_nrg, ~] = calcMEC_Objectives(uav_pos, User, priorities, params);
+        pareto_archive = updateParetoArchive3D(pareto_archive, uav_pos, cand_util, cand_lat, cand_nrg);
+    end
+
+    [best_fit, best_idx] = max(fitness_pop);
+    bestUAV = reshape(population(best_idx, :), N_UAV, 2);
+    center_point_rep = repmat([500, 500], N_UAV, 1);
+    fly_dist = sqrt(sum((bestUAV - center_point_rep).^2, 2));
+    best_energy = sum(params.k_move * fly_dist);
+
+    cg_curve = zeros(1, max_iter);
+    [init_real_utility, ~, ~, ~] = calcMEC_Objectives(bestUAV, User, priorities, params);
+    cg_curve(1) = init_real_utility;
+
+    for iter = 2:max_iter
+        a = 2 - iter * (2 / max_iter);
+
+        for i = 1:pop_size
+            new_pos = zeros(1, n_vars);
+            for j = 1:n_vars
                 r1 = 2 * a * rand() - a;
                 r2 = 2 * pi * rand();
                 r3 = 2 * rand();
-                new_population(i, j) = new_population(i, j) + ...
-                    (r1 * sin(r2) * (r3 * bestUAV(i, j) - new_population(i, j)));
+                new_pos(j) = new_pos(j) + r1 * sin(r2) * (r3 * bestUAV(j) - new_pos(j));
             end
 
-            flagub = new_population(i, :) > Ub;
-            new_population(i, flagub) = 2 * Ub(flagub) - new_population(i, flagub);
-            flaglb = new_population(i, :) < Lb;
-            new_population(i, flaglb) = 2 * Lb(flaglb) - new_population(i, flaglb);
-        end
-
-        for i = 1:N_UAV
-            tmp_UAV = bestUAV;
-            tmp_UAV(i, :) = new_population(i, :);
-            uavindex = 1:N_UAV;
-            uavindex(i) = [];
-
-            if all(sqrt(sum((tmp_UAV(i, :) - tmp_UAV(uavindex, :)).^2, 2)) >= params.D_UU) && ...
-               all(sqrt(sum((tmp_UAV(i, :) - RRH(1:end, :)).^2, 2)) >= params.D_RU)
-
-                iter_count = iter_count + 1;
-
-                fly_dist = sqrt(sum((tmp_UAV - center_point).^2, 2));
-                fly_energy = params.k_move * fly_dist;
-                E_curr = max(0, params.E_max - fly_energy);
-
-                [tmp_fitness, ~, ~, ~] = calcFitness(tmp_UAV, User, priorities, E_curr, params.E_max, params.k_move, 1, ...
-                    params.subpop_params, N_UAV, params.cover_radius, RRH, 0.5, N_RRH, RRH_type, UAV_type, params);
-
-                % 【关键修复】强制评估当前候选解的真实物理指标并归档
-                [cand_util, cand_lat, cand_nrg, ~] = calcMEC_Objectives(tmp_UAV, User, priorities, params);
-                pareto_archive = updateParetoArchive3D(pareto_archive, tmp_UAV, cand_util, cand_lat, cand_nrg);
-
-                winner = 2 * (bestUAV(i, :) - Lb) ./ (Ub - Lb) - 1;
-                loser = 2 * (new_population(i, :) - Lb) ./ (Ub - Lb) - 1;
-
-                if tmp_fitness > best_fit
-                    winner = 2 * (new_population(i, :) - Lb) ./ (Ub - Lb) - 1;
-                    loser = 2 * (bestUAV(i, :) - Lb) ./ (Ub - Lb) - 1;
-                    bestUAV(i, :) = new_population(i, :);
-                    best_fit = tmp_fitness;
-                end
-
-                for k = 1:2
-                    mut = mu(i, k);
-                    mu(i, k) = mut + (1 / Np) * (winner(k) - loser(k));
-                    tt = sicma(i, k)^2 + mut^2 - mu(i, k)^2 + (1 / Np) * (winner(k)^2 - loser(k)^2);
-                    if tt > 0
-                        sicma(i, k) = sqrt(tt);
-                    else
-                        sicma(i, k) = 10;
-                    end
-                end
-
-                if iter_count > max_iter
-                    break;
-                end
-
-                % 将真实效用存入画图数组
-                [real_utility, ~, ~, ~] = calcMEC_Objectives(bestUAV, User, priorities, params);
-                cg_curve(iter_count) = real_utility;
+            new_pos = max(Lb(1), min(Ub(1), new_pos));
+            uav_pos = reshape(new_pos, N_UAV, 2);
+            if ~checkConstraints(uav_pos, params.D_UU, params.D_RU, RRH)
+                uav_pos = enforceConstraints(uav_pos, params.D_UU, params.D_RU, RRH);
+                new_pos = reshape(uav_pos, 1, N_UAV * 2);
             end
+
+            winner = new_pos;
+            loser = population(i, :);
+
+            center_point_rep = repmat([500, 500], N_UAV, 1);
+            fly_dist = sqrt(sum((reshape(new_pos, N_UAV, 2) - center_point_rep).^2, 2));
+            fly_energy = params.k_move * fly_dist;
+            E_curr = max(0, params.E_max - fly_energy);
+
+            [candidate_fit, ~, ~, ~] = calcFitness(reshape(new_pos, N_UAV, 2), User, priorities, E_curr, params.E_max, params.k_move, 1, ...
+                params.subpop_params, N_UAV, params.cover_radius, RRH, 0.5, N_RRH, RRH_type, UAV_type, params);
+
+            if candidate_fit > fitness_pop(i)
+                winner = new_pos;
+                loser = population(i, :);
+                fitness_pop(i) = candidate_fit;
+                population(i, :) = new_pos;
+
+                if candidate_fit > best_fit
+                    best_fit = candidate_fit;
+                    bestUAV = reshape(new_pos, N_UAV, 2);
+                    fly_dist = sqrt(sum((bestUAV - center_point_rep).^2, 2));
+                    best_energy = sum(params.k_move * fly_dist);
+                end
+            else
+                winner = population(i, :);
+                loser = new_pos;
+            end
+
+            mu(i, :) = mu(i, :) + (1 / Np) * (winner - loser);
+            var_update = sigma(i, :).^2 + mu(i, :).^2 - (mu(i, :) + (1 / Np) * (winner - loser)).^2 ...
+                + (1 / Np) * (winner.^2 - loser.^2);
+            sigma(i, :) = sqrt(max(var_update, 1e-6));
+
+            [cand_util, cand_lat, cand_nrg, ~] = calcMEC_Objectives(reshape(population(i, :), N_UAV, 2), User, priorities, params);
+            pareto_archive = updateParetoArchive3D(pareto_archive, reshape(population(i, :), N_UAV, 2), cand_util, cand_lat, cand_nrg);
         end
 
-        if mod(iter_count, 1000) == 0
-            fprintf('cSA iter %d/%d, Best fitness: %.4f\n', iter_count, max_iter, best_fit);
+        [real_utility, ~, ~, ~] = calcMEC_Objectives(bestUAV, User, priorities, params);
+        cg_curve(iter) = real_utility;
+
+        if mod(iter, 50) == 0
+            fprintf('cSA iter %d/%d, Best fitness: %.4f\n', iter, max_iter, best_fit);
         end
     end
 
-    % 【关键修复】末尾从 Pareto 归档中提取最终指标 (与其他算法统一)
     if ~isempty(pareto_archive) && length(pareto_archive) >= 1
         arch_utils = [pareto_archive.Utility];
         [~, max_u_idx] = max(arch_utils);
@@ -158,8 +141,74 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = cSA_UAV(N_
         best_fit = pareto_archive(max_u_idx).Utility;
         best_energy = pareto_archive(max_u_idx).Energy;
     else
-        [final_util, ~, final_nrg, ~] = calcMEC_Objectives(bestUAV, User, priorities, params);
-        best_fit = final_util;
-        best_energy = final_nrg;
+        center_point_rep = repmat([500, 500], N_UAV, 1);
+        fly_dist = sqrt(sum((bestUAV - center_point_rep).^2, 2));
+        fly_energy = params.k_move * fly_dist;
+        E_curr = max(0, params.E_max - fly_energy);
+        [best_fit, best_util, ~, best_nrg] = calcFitness(bestUAV, User, priorities, E_curr, params.E_max, params.k_move, 1, ...
+            params.subpop_params, N_UAV, params.cover_radius, RRH, 0.5, N_RRH, RRH_type, UAV_type, params);
+        best_fit = best_util;
+        best_energy = best_nrg;
+    end
+end
+
+function feasible = checkConstraints(uav_pos, D_UU, D_RU, RRH)
+    N_UAV = size(uav_pos, 1);
+    feasible = true;
+
+    for i = 1:N_UAV
+        for j = i+1:N_UAV
+            dist = sqrt(sum((uav_pos(i, :) - uav_pos(j, :)).^2, 2));
+            if dist < D_UU
+                feasible = false;
+                return;
+            end
+        end
+    end
+
+    for i = 1:N_UAV
+        for j = 1:size(RRH, 1)
+            dist = sqrt(sum((uav_pos(i, :) - RRH(j, :)).^2, 2));
+            if dist < D_RU
+                feasible = false;
+                return;
+            end
+        end
+    end
+end
+
+function uav_pos = enforceConstraints(uav_pos, D_UU, D_RU, RRH)
+    N_UAV = size(uav_pos, 1);
+    max_iter = 100;
+
+    for iter = 1:max_iter
+        changed = false;
+
+        for i = 1:N_UAV
+            for j = i+1:N_UAV
+                dist = sqrt(sum((uav_pos(i, :) - uav_pos(j, :)).^2, 2));
+                if dist < D_UU && dist > 0
+                    direction = (uav_pos(i, :) - uav_pos(j, :)) / dist;
+                    uav_pos(i, :) = uav_pos(i, :) + direction * (D_UU - dist) * 0.5;
+                    uav_pos(j, :) = uav_pos(j, :) - direction * (D_UU - dist) * 0.5;
+                    changed = true;
+                end
+            end
+        end
+
+        for i = 1:N_UAV
+            for j = 1:size(RRH, 1)
+                dist = sqrt(sum((uav_pos(i, :) - RRH(j, :)).^2, 2));
+                if dist < D_RU && dist > 0
+                    direction = (uav_pos(i, :) - RRH(j, :)) / dist;
+                    uav_pos(i, :) = uav_pos(i, :) + direction * (D_RU - dist);
+                    changed = true;
+                end
+            end
+        end
+
+        if ~changed
+            break;
+        end
     end
 end

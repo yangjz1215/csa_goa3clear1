@@ -83,12 +83,12 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = GOA_UAV(N_
         if rand > 0.5
             for i = 1:pop_size
                 if rand >= 0.5
-                    u1 = unifrnd(-a, a, 1, dim);
+                    u1 = -a + 2 * a .* rand(1, dim);
                     idx = randi(pop_size);
                     u2 = A * (population(i, :) - population(idx, :));
                     MX(i, :) = population(i, :) + u1 + u2;
                 else
-                    v1 = unifrnd(-b, b, 1, dim);
+                    v1 = -b + 2 * b .* rand(1, dim);
                     v2 = B * (population(i, :) - mean(population, 1));
                     MX(i, :) = population(i, :) + v1 + v2;
                 end

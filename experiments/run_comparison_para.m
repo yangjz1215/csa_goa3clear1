@@ -163,9 +163,9 @@ function results = run_comparison_para(varargin)
         results.(alg_name).convergence_metric = 'best_so_far_utility';
         results.(alg_name).convergence_unit = 'priority_sum';
         results.(alg_name).max_generations = params.FES_max;
-        results.(alg_name).mean_scalar_utility = nanmean(scalar_utilities);
-        results.(alg_name).mean_scalar_latency = nanmean(scalar_latencies);
-        results.(alg_name).mean_scalar_energy = nanmean(scalar_energies);
+        results.(alg_name).mean_scalar_utility = mean(scalar_utilities, 'omitnan');
+        results.(alg_name).mean_scalar_latency = mean(scalar_latencies, 'omitnan');
+        results.(alg_name).mean_scalar_energy = mean(scalar_energies, 'omitnan');
         results.(alg_name).mean_utility = mean(archive_utilities);
         results.(alg_name).std_utility = std(archive_utilities);
         results.(alg_name).mean_latency = mean(archive_latencies);
@@ -173,12 +173,12 @@ function results = run_comparison_para(varargin)
         results.(alg_name).mean_cov_high = mean(cov_high);
         results.(alg_name).mean_cov_total = mean(cov_total);
         results.(alg_name).hv_values = hv_values;
-        results.(alg_name).mean_hv = nanmean(hv_values);
-        results.(alg_name).std_hv = nanstd(hv_values);
+        results.(alg_name).mean_hv = mean(hv_values, 'omitnan');
+        results.(alg_name).std_hv = std(hv_values, 0, 'omitnan');
         results.(alg_name).igd_values = igd_values;
-        results.(alg_name).mean_igd = nanmean(igd_values);
+        results.(alg_name).mean_igd = mean(igd_values, 'omitnan');
         results.(alg_name).spread_values = spread_values;
-        results.(alg_name).mean_spread = nanmean(spread_values);
+        results.(alg_name).mean_spread = mean(spread_values, 'omitnan');
         results.(alg_name).mean_pareto_size = mean(pareto_sizes);
         results.(alg_name).pareto_fronts = pareto_fronts_cell;
         results.(alg_name).runtimes = runtimes;
@@ -188,11 +188,11 @@ function results = run_comparison_para(varargin)
 
         fprintf('  >> %s 平均结果:\n', alg_desc);
         fprintf('     日志口径(标量最优解): Utility=%.2f | Latency=%.2f s | Energy=%.2f J\n', ...
-            nanmean(scalar_utilities), nanmean(scalar_latencies), nanmean(scalar_energies));
+            mean(scalar_utilities, 'omitnan'), mean(scalar_latencies, 'omitnan'), mean(scalar_energies, 'omitnan'));
         fprintf('     最终汇总(档案最大Utility解): Utility=%.2f +/- %.2f\n', mean(archive_utilities), std(archive_utilities));
         fprintf('     平均时延: %.2f s\n', mean(archive_latencies));
         fprintf('     平均能耗: %.2f J\n', mean(archive_energies));
-        fprintf('     平均HV: %.4f +/- %.4f\n', nanmean(hv_values), nanstd(hv_values));
+        fprintf('     平均HV: %.4f +/- %.4f\n', mean(hv_values, 'omitnan'), std(hv_values, 0, 'omitnan'));
         fprintf('     平均Runtime: %.2f s\n', mean(runtimes));
     end
 
@@ -408,19 +408,19 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
             end
         end
 
-        results.(name).mean_hv_norm = nanmean(hvs);
-        results.(name).std_hv_norm = nanstd(hvs);
-        results.(name).mean_igd_norm = nanmean(igds);
-        results.(name).std_igd_norm = nanstd(igds);
-        results.(name).mean_spread_norm = nanmean(spreads);
-        results.(name).std_spread_norm = nanstd(spreads);
+        results.(name).mean_hv_norm = mean(hvs, 'omitnan');
+        results.(name).std_hv_norm = std(hvs, 0, 'omitnan');
+        results.(name).mean_igd_norm = mean(igds, 'omitnan');
+        results.(name).std_igd_norm = std(igds, 0, 'omitnan');
+        results.(name).mean_spread_norm = mean(spreads, 'omitnan');
+        results.(name).std_spread_norm = std(spreads, 0, 'omitnan');
 
         results.(name).igd_values = igds;
         results.(name).spread_values = spreads;
         results.(name).hv_values = hvs;
 
         fprintf('%-14s | %-10.2f | %-12.2f | %-12.2f | %-5.4f±%-5.4f | %-5.4f±%-5.4f | %-8.4f\n', ...
-            name, r.mean_utility, r.mean_latency, r.mean_energy, nanmean(hvs), nanstd(hvs), nanmean(igds), nanstd(igds), nanmean(spreads));
+            name, r.mean_utility, r.mean_latency, r.mean_energy, mean(hvs, 'omitnan'), std(hvs, 0, 'omitnan'), mean(igds, 'omitnan'), std(igds, 0, 'omitnan'), mean(spreads, 'omitnan'));
     end
     fprintf('%s\n', repmat('-', 1, 120));
 end
@@ -509,7 +509,7 @@ function wilcoxon_table = computeWilcoxonTable(results, algorithms)
         wilcoxon_table{row, 4} = sig_str;
         wilcoxon_table{row, 5} = alg_name;
 
-        fprintf('%-40s | %-12.6f | %-12d | %-14s\n', ...
+        fprintf('%-40s | %-12.2e | %-12d | %-14s\n', ...
             wilcoxon_table{row, 1}, p_val, h, sig_str);
     end
 
