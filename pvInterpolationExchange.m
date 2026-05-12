@@ -1,7 +1,6 @@
-function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, D_UU, D_RU, n_alphas)
-    if nargin < 9
-        n_alphas = 3;
-    end
+function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, D_UU, D_RU, User, priorities, params)
+%PVINTERPOLATIONEXCHANGE 子群 PV 凸组合采样；α 在 {0,1/2,1} 上零阶线搜索（与 G_weights 对齐的标量 J）
+%   每对子群输出 1 个候选（共 3 对），减少无效随机混合。
 
     n_subpops = length(subpops);
     if n_subpops < 2
@@ -9,9 +8,24 @@ function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH,
         return;
     end
 
-    % Prefer G2–G3 (时延–能耗) and G1–G3 (效用–能耗) before G1–G2，利于折中区域与 IGD
     pairs = [2, 3; 1, 3; 1, 2];
     mixed_candidates = [];
+
+    N_User = size(User, 1);
+    maxL = N_User * params.max_latency + 1e-9;
+    maxE = N_UAV * params.E_max + 1e-9;
+    maxU = sum(priorities) + 1e-9;
+    if isfield(params, 'G_weights') && numel(params.G_weights) >= 3
+        wu = params.G_weights(1);
+        wl = params.G_weights(2);
+        we = params.G_weights(3);
+    else
+        wu = 0.4;
+        wl = 0.3;
+        we = 0.3;
+    end
+
+    alpha_grid = [0, 0.5, 1];
 
     for p = 1:size(pairs, 1)
         idx_a = pairs(p, 1);
@@ -22,9 +36,12 @@ function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH,
         mu_b = subpops{idx_b}.mu;
         sigma_b = subpops{idx_b}.sigma;
 
-        for k = 1:n_alphas
-            alpha = rand();
+        best_j = -inf;
+        best_pos = [];
+        best_alpha = 0.5;
 
+        for ka = 1:numel(alpha_grid)
+            alpha = alpha_grid(ka);
             mu_mix = alpha * mu_a + (1 - alpha) * mu_b;
             sigma_mix = alpha * sigma_a + (1 - alpha) * sigma_b;
 
@@ -33,17 +50,28 @@ function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH,
                 pos = mu_mix(uav_idx, :) + sigma_mix(uav_idx, :) .* randn(1, 2);
                 uav_pos(uav_idx, :) = max(Lb, min(Ub, pos));
             end
-
             uav_pos = enforceUAVDistanceLocal(uav_pos, D_UU);
 
-            candidate = struct();
-            candidate.UAV_pos = uav_pos;
-            candidate.alpha = alpha;
-            candidate.pair = [idx_a, idx_b];
-            candidate.source = 'pv_interpolation';
+            [util, lat, nrg] = calcMEC_Objectives(uav_pos, User, priorities, params);
+            J = wu * (util / maxU) - wl * (lat / maxL) - we * (nrg / maxE);
 
-            mixed_candidates = [mixed_candidates; candidate];
+            if J > best_j
+                best_j = J;
+                best_pos = uav_pos;
+                best_alpha = alpha;
+            end
         end
+
+        if isempty(best_pos)
+            continue;
+        end
+
+        candidate = struct();
+        candidate.UAV_pos = best_pos;
+        candidate.alpha = best_alpha;
+        candidate.pair = [idx_a, idx_b];
+        candidate.source = 'pv_interpolation';
+        mixed_candidates = [mixed_candidates; candidate];
     end
 end
 
@@ -54,7 +82,7 @@ function pos = enforceUAVDistanceLocal(pos, D_UU)
         moved = false;
         for i = 1:N
             for j = i+1:N
-                dist = norm(pos(i,:) - pos(j,:));
+                dist = norm(pos(i, :) - pos(j, :));
                 if dist < D_UU && dist > 0
                     dir = randn(1, 2);
                     if norm(dir) < 1e-6
@@ -62,8 +90,8 @@ function pos = enforceUAVDistanceLocal(pos, D_UU)
                     end
                     dir = dir / norm(dir);
                     delta = (D_UU * 1.1 - dist) / 2;
-                    pos(i,:) = pos(i,:) - dir * delta;
-                    pos(j,:) = pos(j,:) + dir * delta;
+                    pos(i, :) = pos(i, :) - dir * delta;
+                    pos(j, :) = pos(j, :) + dir * delta;
                     moved = true;
                 end
             end
@@ -74,16 +102,16 @@ function pos = enforceUAVDistanceLocal(pos, D_UU)
     end
     for i = 1:N
         for j = i+1:N
-            dist = norm(pos(i,:) - pos(j,:));
+            dist = norm(pos(i, :) - pos(j, :));
             if dist < D_UU && dist > 0
-                dir = (pos(i,:) - pos(j,:)) / (dist + 1e-6);
+                dir = (pos(i, :) - pos(j, :)) / (dist + 1e-6);
                 if norm(dir) < 1e-6
                     dir = [1, 0];
                 end
                 dir = dir / norm(dir);
-                mid_point = (pos(i,:) + pos(j,:)) / 2;
-                pos(i,:) = mid_point + dir * (D_UU * 1.1 / 2);
-                pos(j,:) = mid_point - dir * (D_UU * 1.1 / 2);
+                mid_point = (pos(i, :) + pos(j, :)) / 2;
+                pos(i, :) = mid_point + dir * (D_UU * 1.1 / 2);
+                pos(j, :) = mid_point - dir * (D_UU * 1.1 / 2);
             end
         end
     end

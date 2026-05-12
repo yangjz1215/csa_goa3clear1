@@ -22,17 +22,17 @@ end
 if ~isfield(params, 'pv_interpolation_interval') || isempty(params.pv_interpolation_interval)
     params.pv_interpolation_interval = 15;
 end
-if ~isfield(params, 'pv_interpolation_count') || isempty(params.pv_interpolation_count)
-    params.pv_interpolation_count = 2;
-end
-if ~isfield(params, 'pv_interpolation_start_frac') || isempty(params.pv_interpolation_start_frac)
-    params.pv_interpolation_start_frac = 0.32;
-end
-if ~isfield(params, 'pv_interpolation_prob') || isempty(params.pv_interpolation_prob)
-    params.pv_interpolation_prob = 0.72;
-end
 if ~isfield(params, 'pv_interpolation_min_archive') || isempty(params.pv_interpolation_min_archive)
     params.pv_interpolation_min_archive = 10;
+end
+if ~isfield(params, 'mem_quota_m') || isempty(params.mem_quota_m)
+    params.mem_quota_m = 2;
+end
+if ~isfield(params, 'pv_mix_logit_k') || isempty(params.pv_mix_logit_k)
+    params.pv_mix_logit_k = -7;
+end
+if ~isfield(params, 'pv_mix_logit_c') || isempty(params.pv_mix_logit_c)
+    params.pv_mix_logit_c = 0.38;
 end
 
 params.RRH = RRH;
@@ -111,6 +111,8 @@ actual_iter = params.FES_max;
 
 for iter = 2:params.FES_max
     t = 1 - iter / params.FES_max;
+    phi_t = computePhasePhi(iter, params.FES_max, bestUAV, User, priorities, params, RRH);
+    pv_accept = 1 / (1 + exp(-(params.pv_mix_logit_k * (phi_t - params.pv_mix_logit_c))));
 
     for g = 1:3
         capturability_g(g) = calcCapturability(subpops{g}, iter, params.FES_max, g);
@@ -145,7 +147,8 @@ for iter = 2:params.FES_max
                 end
                 mem_ref_pos = mem_candidate(uav_idx, :);
 
-                if rand >= params.subpop_params.q(g)
+                q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.48 * phi_t)));
+                if rand >= q_eff
                     pos = goaUShape(subpops{g}, mem_ref_pos, t, X_init, g);
                 else
                     pos = goaVShape(subpops{g}, mem_ref_pos, t, X_init, X_mean_g, g);
@@ -190,7 +193,8 @@ for iter = 2:params.FES_max
                     subpop_best_uav = leader_G3(uav_idx, :);
                 end
 
-                pos = goaTurn(cand_i(uav_idx, :), subpop_best_uav, capturability_g(g), t);
+                cap_eff = capturability_g(g) * (0.62 + 0.48 * (1 - phi_t));
+                pos = goaTurn(cand_i(uav_idx, :), subpop_best_uav, cap_eff, t);
                 pos = projectToFeasiblePosition(pos, cand_i(uav_idx, :), cand_i, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb);
                 candidates(i, uav_idx, :) = pos(:)';
             end
@@ -307,13 +311,12 @@ for iter = 2:params.FES_max
     if mod(iter, 5) == 0 || iter == params.FES_max
         pareto_updated_this_iter = false;
 
-        iter_min_pv = max(20, round(params.pv_interpolation_start_frac * params.FES_max));
         do_pv_mix = params.enable_pv_interpolation && params.enable_multi_subpop && ...
-            iter >= iter_min_pv && mod(iter, params.pv_interpolation_interval) == 0 && ...
+            iter >= 20 && mod(iter, params.pv_interpolation_interval) == 0 && ...
             length(pareto_archive) >= params.pv_interpolation_min_archive && ...
-            rand <= params.pv_interpolation_prob;
+            rand < pv_accept;
         if do_pv_mix
-            mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, params.D_UU, params.D_RU, params.pv_interpolation_count);
+            mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, params.D_UU, params.D_RU, User, priorities, params);
             for mc = 1:length(mixed_candidates)
                 cand_pos = mixed_candidates(mc).UAV_pos;
                 [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(cand_pos, User, priorities, params);
