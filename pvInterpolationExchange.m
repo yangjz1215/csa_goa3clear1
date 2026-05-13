@@ -1,6 +1,7 @@
 function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, D_UU, D_RU, User, priorities, params)
-%PVINTERPOLATIONEXCHANGE 子群 PV 凸组合采样；α 在 {0,1/2,1} 上零阶线搜索（与 G_weights 对齐的标量 J）
-%   每对子群输出 1 个候选（共 3 对），减少无效随机混合。
+%PVINTERPOLATIONEXCHANGE 子群PV凸组合采样：每对子群产生2个候选（贪心+随机）
+%   贪心候选在α网格上搜索最优标量J；随机候选保证插值方向的多样性
+%   接口不变：返回struct数组，含UAV_pos/alpha/pair/source字段
 
     n_subpops = length(subpops);
     if n_subpops < 2
@@ -36,21 +37,15 @@ function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH,
         mu_b = subpops{idx_b}.mu;
         sigma_b = subpops{idx_b}.sigma;
 
+        % --- 候选A：α网格贪心搜索 ---
         best_j = -inf;
         best_pos = [];
         best_alpha = 0.5;
 
         for ka = 1:numel(alpha_grid)
             alpha = alpha_grid(ka);
-            mu_mix = alpha * mu_a + (1 - alpha) * mu_b;
-            sigma_mix = alpha * sigma_a + (1 - alpha) * sigma_b;
-
-            uav_pos = zeros(N_UAV, 2);
-            for uav_idx = 1:N_UAV
-                pos = mu_mix(uav_idx, :) + sigma_mix(uav_idx, :) .* randn(1, 2);
-                uav_pos(uav_idx, :) = max(Lb, min(Ub, pos));
-            end
-            uav_pos = enforceUAVDistanceLocal(uav_pos, D_UU);
+            [uav_pos, valid] = mixAndSample(mu_a, sigma_a, mu_b, sigma_b, alpha, N_UAV, Ub, Lb, D_UU);
+            if ~valid, continue; end
 
             [util, lat, nrg] = calcMEC_Objectives(uav_pos, User, priorities, params);
             J = wu * (util / maxU) - wl * (lat / maxL) - we * (nrg / maxE);
@@ -62,22 +57,46 @@ function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH,
             end
         end
 
-        if isempty(best_pos)
-            continue;
+        if ~isempty(best_pos)
+            cand = struct();
+            cand.UAV_pos = best_pos;
+            cand.alpha = best_alpha;
+            cand.pair = [idx_a, idx_b];
+            cand.source = 'pv_greedy';
+            mixed_candidates = [mixed_candidates; cand];
         end
 
-        candidate = struct();
-        candidate.UAV_pos = best_pos;
-        candidate.alpha = best_alpha;
-        candidate.pair = [idx_a, idx_b];
-        candidate.source = 'pv_interpolation';
-        mixed_candidates = [mixed_candidates; candidate];
+        % --- 候选B：随机α采样，保证插值方向多样性 ---
+        alpha_rand = rand();
+        [uav_pos_r, valid_r] = mixAndSample(mu_a, sigma_a, mu_b, sigma_b, alpha_rand, N_UAV, Ub, Lb, D_UU);
+        if valid_r
+            cand_r = struct();
+            cand_r.UAV_pos = uav_pos_r;
+            cand_r.alpha = alpha_rand;
+            cand_r.pair = [idx_a, idx_b];
+            cand_r.source = 'pv_random';
+            mixed_candidates = [mixed_candidates; cand_r];
+        end
     end
+end
+
+function [uav_pos, valid] = mixAndSample(mu_a, sigma_a, mu_b, sigma_b, alpha, N_UAV, Ub, Lb, D_UU)
+%MIXANDSAMPLE 对两个子群PV做凸混合后采样一个UAV部署方案
+    mu_mix = alpha * mu_a + (1 - alpha) * mu_b;
+    sigma_mix = alpha * sigma_a + (1 - alpha) * sigma_b;
+
+    uav_pos = zeros(N_UAV, 2);
+    for uav_idx = 1:N_UAV
+        pos = mu_mix(uav_idx, :) + sigma_mix(uav_idx, :) .* randn(1, 2);
+        uav_pos(uav_idx, :) = max(Lb, min(Ub, pos));
+    end
+    uav_pos = enforceUAVDistanceLocal(uav_pos, D_UU);
+    valid = true;
 end
 
 function pos = enforceUAVDistanceLocal(pos, D_UU)
     N = size(pos, 1);
-    max_iter = 20;
+    max_iter = 10;  % 收敛通常2-3轮，上限10足够
     for iter = 1:max_iter
         moved = false;
         for i = 1:N
@@ -100,6 +119,7 @@ function pos = enforceUAVDistanceLocal(pos, D_UU)
             break;
         end
     end
+    % 兜底：确保严格满足最小距离
     for i = 1:N
         for j = i+1:N
             dist = norm(pos(i, :) - pos(j, :));

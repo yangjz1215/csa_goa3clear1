@@ -26,7 +26,7 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
         params.mem_quota_m = 2;
     end
     if ~isfield(params, 'pv_mix_logit_k') || isempty(params.pv_mix_logit_k)
-        params.pv_mix_logit_k = -7;
+        params.pv_mix_logit_k = -5;
     end
     if ~isfield(params, 'pv_mix_logit_c') || isempty(params.pv_mix_logit_c)
         params.pv_mix_logit_c = 0.38;
@@ -113,9 +113,18 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
     fprintf('初始化完成：综合适应度=%.4f | 真实效用(优先级和)=%.1f | 时延=%.2fs | 能耗=%.1f J\n', ...
         scalar_best_fit, real_u, real_l, real_e);
 
+    cached_phi_t = 1.0;
+    cached_bestUAV = zeros(0);
+
     for iter = 2:params.FES_max
         t = 1 - iter / params.FES_max;
-        phi_t = computePhasePhi(iter, params.FES_max, bestUAV, User, priorities, params, RRH);
+
+        % 序参量缓存：bestUAV不变则复用
+        if size(cached_bestUAV, 1) ~= size(bestUAV, 1) || isempty(cached_bestUAV) || any(cached_bestUAV(:) ~= bestUAV(:))
+            cached_phi_t = computePhasePhi(iter, params.FES_max, bestUAV, User, priorities, params, RRH);
+            cached_bestUAV = bestUAV;
+        end
+        phi_t = cached_phi_t;
         pv_accept = 1 / (1 + exp(-(params.pv_mix_logit_k * (phi_t - params.pv_mix_logit_c))));
 
         for g = 1:n_subpops
@@ -160,7 +169,7 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                     mem_ref_pos = mem_candidate(uav_idx, :);
 
                     if params.enable_goa_repulsion
-                        q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.48 * phi_t)));
+                        q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.35 * phi_t)));
                         if rand >= q_eff
                             pos = goaUShape(subpops{g}, mem_ref_pos, t, X_init, g);
                         else
@@ -207,7 +216,7 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 end
 
                 if params.enable_goa_turn
-                    cap_eff = capturability_g(g) * (0.62 + 0.48 * (1 - phi_t));
+                    cap_eff = capturability_g(g) * (0.75 + 0.25 * (1 - phi_t));
                     for uav_idx = 1:N_UAV
                         pos = goaTurn(cand_i(uav_idx, :), global_leader(uav_idx, :), cap_eff, t);
                         pos = max(Lb, min(Ub, pos));

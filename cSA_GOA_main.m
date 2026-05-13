@@ -29,7 +29,7 @@ if ~isfield(params, 'mem_quota_m') || isempty(params.mem_quota_m)
     params.mem_quota_m = 2;
 end
 if ~isfield(params, 'pv_mix_logit_k') || isempty(params.pv_mix_logit_k)
-    params.pv_mix_logit_k = -7;
+    params.pv_mix_logit_k = -5;  % 缓和logit门控曲线，保持中期PV信息交换频率
 end
 if ~isfield(params, 'pv_mix_logit_c') || isempty(params.pv_mix_logit_c)
     params.pv_mix_logit_c = 0.38;
@@ -108,10 +108,18 @@ fprintf('初始化完成：综合适应度=%.4f | 真实效用(优先级和)=%.1
 
 mo_stagnation_counter = 0;
 actual_iter = params.FES_max;
+cached_phi_t = 1.0;   % 序参量缓存：仅在bestUAV变化时重算
+cached_bestUAV = zeros(0);
 
 for iter = 2:params.FES_max
     t = 1 - iter / params.FES_max;
-    phi_t = computePhasePhi(iter, params.FES_max, bestUAV, User, priorities, params, RRH);
+
+    % 序参量缓存：bestUAV不变则复用，避免每代重复调用calcMEC_Objectives
+    if size(cached_bestUAV, 1) ~= size(bestUAV, 1) || isempty(cached_bestUAV) || any(cached_bestUAV(:) ~= bestUAV(:))
+        cached_phi_t = computePhasePhi(iter, params.FES_max, bestUAV, User, priorities, params, RRH);
+        cached_bestUAV = bestUAV;
+    end
+    phi_t = cached_phi_t;
     pv_accept = 1 / (1 + exp(-(params.pv_mix_logit_k * (phi_t - params.pv_mix_logit_c))));
 
     for g = 1:3
@@ -147,7 +155,7 @@ for iter = 2:params.FES_max
                 end
                 mem_ref_pos = mem_candidate(uav_idx, :);
 
-                q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.48 * phi_t)));
+                q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.35 * phi_t)));  % 保留子群差异化分工
                 if rand >= q_eff
                     pos = goaUShape(subpops{g}, mem_ref_pos, t, X_init, g);
                 else
@@ -193,7 +201,7 @@ for iter = 2:params.FES_max
                     subpop_best_uav = leader_G3(uav_idx, :);
                 end
 
-                cap_eff = capturability_g(g) * (0.62 + 0.48 * (1 - phi_t));
+                cap_eff = capturability_g(g) * (0.75 + 0.25 * (1 - phi_t));  % 保障Pareto leader引导力，维持前沿覆盖
                 pos = goaTurn(cand_i(uav_idx, :), subpop_best_uav, cap_eff, t);
                 pos = projectToFeasiblePosition(pos, cand_i(uav_idx, :), cand_i, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb);
                 candidates(i, uav_idx, :) = pos(:)';
