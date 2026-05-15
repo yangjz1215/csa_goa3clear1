@@ -242,8 +242,6 @@ function [User, priorities, N_User, N_UAV, RRH, RRH_type, N_RRH, UAV_type, Ub, L
     params.subpop_params.mu0 = [500, 500];
     params.subpop_params.sigma0 = [150, 150; 120, 120; 80, 80];
     params.subpop_params.sigma_min = [5, 8, 3];
-    params.subpop_params.w_inertia = [0.7, 0.6, 0.8];
-    params.subpop_params.c = [0.15, 0.10, 0.08];
     params.subpop_params.q = [0.6, 0.5, 0.4];
     params.subpop_params.beta = [0.8, 0.7, 0.6];
 
@@ -260,6 +258,17 @@ function [User, priorities, N_User, N_UAV, RRH, RRH_type, N_RRH, UAV_type, Ub, L
         params.K = opt_params.best_K;
         params.subpop_params.q = [opt_params.best_q, opt_params.best_q, opt_params.best_q];
         fprintf('[动态注入] 已加载最优超参数 K=%d, q=%.1f\n', params.K, opt_params.best_q);
+        if isfield(opt_params, 'best_phase_w_progress')
+            params.phase_w_progress = opt_params.best_phase_w_progress;
+            params.phase_w_cov = opt_params.best_phase_w_cov;
+            params.phase_w_inner = opt_params.best_phase_w_inner;
+            fprintf('[动态注入] phi_t 权重: progress=%.3f, cov=%.3f, inner=%.3f\n', ...
+                opt_params.best_phase_w_progress, opt_params.best_phase_w_cov, opt_params.best_phase_w_inner);
+        end
+        if isfield(opt_params, 'best_beta')
+            params.subpop_params.beta = [opt_params.best_beta, opt_params.best_beta, opt_params.best_beta];
+            fprintf('[动态注入] beta=%.2f\n', opt_params.best_beta);
+        end
     end
 end
 

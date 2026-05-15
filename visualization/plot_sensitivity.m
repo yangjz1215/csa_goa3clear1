@@ -56,4 +56,42 @@ fig_path = fullfile(out_dir, 'sensitivity_hv_bar.fig');
 
 saveas(fig, png_path);
 saveas(fig, fig_path);
-fprintf('柱状图已成功保存至: %s\n', out_dir);
+fprintf('Phase 2 柱状图已成功保存至: %s\n', out_dir);
+
+%% Tier 2 超参数敏感度可视化（phi_t 权重 + beta）
+if exist('tier2_config_names', 'var') && exist('tier2_mean_hv', 'var')
+    fig2 = figure('Name', 'Tier 2 超参数敏感度分析 (HV)', 'Position', [100, 100, 1000, 500]);
+
+    n_t2 = length(tier2_mean_hv);
+    bar_colors2 = repmat([0.2 0.7 0.5], n_t2, 1);
+    % 基准配置标红（第2,5,8,11为各参数的基准值）
+    baseline_idx = [2, 5, 8, 11];
+    for bi = baseline_idx
+        if bi <= n_t2
+            bar_colors2(bi, :) = [0.8 0.2 0.2];
+        end
+    end
+
+    b2 = bar(tier2_mean_hv, 'FaceColor', 'flat');
+    b2.CData = bar_colors2;
+    hold on;
+    errorbar(tier2_mean_hv, tier2_std_hv, 'k.', 'LineWidth', 1.5);
+
+    set(gca, 'XTick', 1:n_t2, 'XTickLabel', tier2_config_names, 'XTickLabelRotation', 35);
+    set(gca, 'FontSize', 10, 'FontName', 'Times New Roman');
+    ylabel('Hypervolume (HV) Score', 'FontWeight', 'bold');
+    title('Sensitivity of Performance to Core Hyperparameters (\phi_t Weights + \beta)', 'FontWeight', 'bold');
+    grid on;
+
+    ylim_min2 = min(tier2_mean_hv) * 0.95;
+    ylim_max2 = max(tier2_mean_hv) * 1.05;
+    if ylim_min2 < ylim_max2
+        ylim([ylim_min2, ylim_max2]);
+    end
+
+    png_path2 = fullfile(out_dir, 'sensitivity_tier2_hv_bar.png');
+    fig_path2 = fullfile(out_dir, 'sensitivity_tier2_hv_bar.fig');
+    saveas(fig2, png_path2);
+    saveas(fig2, fig_path2);
+    fprintf('Tier 2 柱状图已成功保存至: %s\n', out_dir);
+end

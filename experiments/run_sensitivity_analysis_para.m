@@ -93,8 +93,6 @@ function results = run_sensitivity_analysis_para(varargin)
     base_params.subpop_params.mu0 = [500, 500];
     base_params.subpop_params.sigma0 = [150, 150; 120, 120; 80, 80];
     base_params.subpop_params.sigma_min = [5, 8, 3];
-    base_params.subpop_params.w_inertia = [0.7, 0.6, 0.8];
-    base_params.subpop_params.c = [0.15, 0.10, 0.08];
     base_params.subpop_params.q = [0.6, 0.5, 0.4];
     base_params.subpop_params.beta = [0.8, 0.7, 0.6];
 
@@ -282,18 +280,174 @@ function results = run_sensitivity_analysis_para(varargin)
         fprintf('%-30s %8.2f%%\n', config_names{i}, pct);
     end
 
+    %% ========================================================================
+    %% PHASE 3: Tier 2 核心超参数 (phi_t 权重 + beta) 敏感性分析
+    %% ========================================================================
+    fprintf('\n>>> [Phase 3] 开始 Tier 2 核心超参数敏感性分析 (±10%%)...\n');
+
+    tier2_num_configs = 12;
+    tier2_config_names = cell(tier2_num_configs, 1);
+    tier2_inject_field = cell(tier2_num_configs, 1);
+    tier2_inject_value = zeros(tier2_num_configs, 1);
+
+    % phi_t w1 (progress): [0.252, 0.280, 0.308]
+    tier2_config_names{1}  = 'phi_t w1 (progress) -10%';  tier2_inject_field{1} = 'phase_w_progress'; tier2_inject_value(1) = 0.252;
+    tier2_config_names{2}  = 'phi_t w1 (progress) 基准';   tier2_inject_field{2} = 'phase_w_progress'; tier2_inject_value(2) = 0.280;
+    tier2_config_names{3}  = 'phi_t w1 (progress) +10%';  tier2_inject_field{3} = 'phase_w_progress'; tier2_inject_value(3) = 0.308;
+    % phi_t w2 (coverage): [0.378, 0.420, 0.462]
+    tier2_config_names{4}  = 'phi_t w2 (coverage) -10%';  tier2_inject_field{4} = 'phase_w_cov';      tier2_inject_value(4) = 0.378;
+    tier2_config_names{5}  = 'phi_t w2 (coverage) 基准';   tier2_inject_field{5} = 'phase_w_cov';      tier2_inject_value(5) = 0.420;
+    tier2_config_names{6}  = 'phi_t w2 (coverage) +10%';  tier2_inject_field{6} = 'phase_w_cov';      tier2_inject_value(6) = 0.462;
+    % phi_t w3 (inner): [0.270, 0.300, 0.330]
+    tier2_config_names{7}  = 'phi_t w3 (inner) -10%';     tier2_inject_field{7} = 'phase_w_inner';    tier2_inject_value(7) = 0.270;
+    tier2_config_names{8}  = 'phi_t w3 (inner) 基准';      tier2_inject_field{8} = 'phase_w_inner';    tier2_inject_value(8) = 0.300;
+    tier2_config_names{9}  = 'phi_t w3 (inner) +10%';     tier2_inject_field{9} = 'phase_w_inner';    tier2_inject_value(9) = 0.330;
+    % beta (uniform): [0.63, 0.70, 0.77]
+    tier2_config_names{10} = 'beta (uniform) -10%';       tier2_inject_field{10} = 'beta';            tier2_inject_value(10) = 0.63;
+    tier2_config_names{11} = 'beta (uniform) 基准';        tier2_inject_field{11} = 'beta';            tier2_inject_value(11) = 0.70;
+    tier2_config_names{12} = 'beta (uniform) +10%';       tier2_inject_field{12} = 'beta';            tier2_inject_value(12) = 0.77;
+
+    tier2_hv_results = zeros(tier2_num_configs, n_runs);
+    tier2_archive_sizes = zeros(tier2_num_configs, n_runs);
+    tier2_best_utils = zeros(tier2_num_configs, n_runs);
+    tier2_best_lats = zeros(tier2_num_configs, n_runs);
+    tier2_best_nrgs = zeros(tier2_num_configs, n_runs);
+
+    fprintf('开始并行运算，共 %d 组 Tier 2 实验，每组 %d 次运行...\n', tier2_num_configs, n_runs);
+
+    parfor cfg_idx = 1:tier2_num_configs
+        cfg_hvs = zeros(1, n_runs);
+        cfg_sizes = zeros(1, n_runs);
+        cfg_utils = zeros(1, n_runs);
+        cfg_lats = zeros(1, n_runs);
+        cfg_nrgs = zeros(1, n_runs);
+
+        for r = 1:n_runs
+            params_r = base_params;
+            field_name = tier2_inject_field{cfg_idx};
+            val = tier2_inject_value(cfg_idx);
+
+            % phi_t 权重通过 params 字段注入，computePhasePhi.m 自动归一化
+            if strcmp(field_name, 'phase_w_progress') || strcmp(field_name, 'phase_w_cov') || strcmp(field_name, 'phase_w_inner')
+                params_r.(field_name) = val;
+            elseif strcmp(field_name, 'beta')
+                params_r.subpop_params.beta = [val, val, val];
+            end
+
+            [~, ~, ~, ~, ~, ~, ~, ~, ~, pareto_archive] = ...
+                cSA_GOA_main(N_User, User, N_RRH, RRH, RRH_type, N_UAV, UAV_type, ...
+                Ub, Lb, params_r, priorities);
+
+            if ~isempty(pareto_archive)
+                cfg_sizes(r) = length(pareto_archive);
+                arch_util = [pareto_archive.Utility];
+                arch_lat = [pareto_archive.Latency];
+                arch_energy = [pareto_archive.Energy];
+
+                cfg_utils(r) = max(arch_util);
+                cfg_lats(r) = min(arch_lat);
+                cfg_nrgs(r) = min(arch_energy);
+
+                max_U = sum(priorities);
+                max_L = N_User * base_params.max_latency;
+                max_E = base_params.E_max * N_UAV;
+
+                n_U = (max_U - arch_util) / (max_U + 1e-6);
+                n_L = arch_lat / (max_L + 1e-6);
+                n_E = arch_energy / (max_E + 1e-6);
+                normalized_objs = [n_U', n_L', n_E'];
+
+                cfg_hvs(r) = hypervolume(normalized_objs, [1.1, 1.1, 1.1]);
+            else
+                cfg_sizes(r) = 0; cfg_hvs(r) = 0;
+                cfg_utils(r) = 0; cfg_lats(r) = Inf; cfg_nrgs(r) = Inf;
+            end
+        end
+
+        tier2_hv_results(cfg_idx, :) = cfg_hvs;
+        tier2_archive_sizes(cfg_idx, :) = cfg_sizes;
+        tier2_best_utils(cfg_idx, :) = cfg_utils;
+        tier2_best_lats(cfg_idx, :) = cfg_lats;
+        tier2_best_nrgs(cfg_idx, :) = cfg_nrgs;
+
+        fprintf('  Tier2 配置 %d/%d (%s) 完成\n', cfg_idx, tier2_num_configs, tier2_config_names{cfg_idx});
+    end
+
+    tier2_mean_hv = mean(tier2_hv_results, 2);
+    tier2_std_hv = std(tier2_hv_results, 0, 2);
+    tier2_mean_size = mean(tier2_archive_sizes, 2);
+    tier2_mean_util = mean(tier2_best_utils, 2);
+    tier2_mean_lat = mean(tier2_best_lats, 2);
+    tier2_mean_nrg = mean(tier2_best_nrgs, 2);
+
+    fprintf('\n========== Tier 2 超参数敏感性分析结果 ==========\n');
+    fprintf('%-35s %8s %10s %10s %10s %10s\n', '配置', 'HV均值', 'HV标准差', '最大效用', '最小能耗', '解数量');
+    fprintf('------------------------------------------------------------------------------------\n');
+    for i = 1:tier2_num_configs
+        fprintf('%-35s %8.4f %10.4f %10.1f %10.1f %10.1f\n', ...
+            tier2_config_names{i}, tier2_mean_hv(i), tier2_std_hv(i), tier2_mean_util(i), tier2_mean_nrg(i), tier2_mean_size(i));
+    end
+
+    % 自动选出 Tier 2 最优参数并注入 base_params
+    [best_tier2_hv, best_tier2_idx] = max(tier2_mean_hv);
+    best_phase_w_progress = 0.28;
+    best_phase_w_cov = 0.42;
+    best_phase_w_inner = 0.30;
+    best_beta = 0.70;
+
+    field_name_best = tier2_inject_field{best_tier2_idx};
+    val_best = tier2_inject_value(best_tier2_idx);
+    if strcmp(field_name_best, 'phase_w_progress')
+        best_phase_w_progress = val_best;
+    elseif strcmp(field_name_best, 'phase_w_cov')
+        best_phase_w_cov = val_best;
+    elseif strcmp(field_name_best, 'phase_w_inner')
+        best_phase_w_inner = val_best;
+    elseif strcmp(field_name_best, 'beta')
+        best_beta = val_best;
+    end
+
+    base_params.phase_w_progress = best_phase_w_progress;
+    base_params.phase_w_cov = best_phase_w_cov;
+    base_params.phase_w_inner = best_phase_w_inner;
+    base_params.subpop_params.beta = [best_beta, best_beta, best_beta];
+
+    fprintf('\n>>> [Phase 3 完成] 最优 Tier 2 超参数:\n');
+    fprintf('    phi_t 权重: progress=%.3f, coverage=%.3f, inner=%.3f\n', best_phase_w_progress, best_phase_w_cov, best_phase_w_inner);
+    fprintf('    beta=%.2f (HV=%.4f)\n', best_beta, best_tier2_hv);
+    fprintf('    [自动注入] 已将最优 phi_t 权重和 beta 写入 base_params\n');
+
+    %% 保存所有结果
     timestamp = datestr(now, 'yyyymmdd_HHMMSS');
     save_filename = sprintf('sensitivity_results_para_%s_%s.mat', map_name, timestamp);
     save_path = fullfile(project_dir, 'experiments', save_filename);
     params = base_params;
-    save(save_path, 'config_names', 'weight_configs', 'archive_sizes', 'best_utils', 'hv_results', 'map_name', 'params', 'mean_hv', 'std_hv', 'mean_util', 'mean_lat', 'mean_nrg', 'mean_size', ...
-        'K_grid', 'q_grid', 'algo_hv_results', 'best_K', 'best_q', 'best_hv_algo');
+    save(save_path, ...
+        'config_names', 'weight_configs', 'archive_sizes', 'best_utils', 'hv_results', ...
+        'map_name', 'params', 'mean_hv', 'std_hv', 'mean_util', 'mean_lat', 'mean_nrg', 'mean_size', ...
+        'K_grid', 'q_grid', 'algo_hv_results', 'best_K', 'best_q', 'best_hv_algo', ...
+        'tier2_config_names', 'tier2_hv_results', 'tier2_mean_hv', 'tier2_std_hv', ...
+        'tier2_mean_util', 'tier2_mean_lat', 'tier2_mean_nrg', 'tier2_mean_size', ...
+        'tier2_inject_field', 'tier2_inject_value', ...
+        'best_phase_w_progress', 'best_phase_w_cov', 'best_phase_w_inner', 'best_beta');
     fprintf('敏感性分析核心数据已成功保存至: %s\n', save_path);
+
+    % 保存最优超参数到 best_algo_hyperparams.mat（追加新变量，保留已有 best_K/best_q）
+    hyperparam_save = fullfile(project_dir, 'experiments', 'best_algo_hyperparams.mat');
+    if exist(hyperparam_save, 'file')
+        existing = load(hyperparam_save);
+        best_K = existing.best_K;
+        best_q = existing.best_q;
+    end
+    save(hyperparam_save, 'best_K', 'best_q', 'best_phase_w_progress', 'best_phase_w_cov', 'best_phase_w_inner', 'best_beta');
+    fprintf('最优超参数已保存至: %s\n', hyperparam_save);
     fprintf('>> 提示: 请前往 visualization 文件夹运行 plot_sensitivity.m 生成最终的图表和表格\n');
 
     results = struct();
     results.hv_mean = mean_hv; results.hv_std = std_hv;
     results.config_names = config_names;
     results.table = T;
-    fprintf('\n========== 权重敏感性分析完成 ==========\n');
+    results.tier2_hv_mean = tier2_mean_hv; results.tier2_hv_std = tier2_std_hv;
+    results.tier2_config_names = tier2_config_names;
+    fprintf('\n========== 超参数敏感性分析全部完成 ==========\n');
 end
