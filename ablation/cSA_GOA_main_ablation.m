@@ -119,13 +119,21 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
     for iter = 2:params.FES_max
         t = 1 - iter / params.FES_max;
 
-        % 序参量缓存：bestUAV不变则复用
-        if size(cached_bestUAV, 1) ~= size(bestUAV, 1) || isempty(cached_bestUAV) || any(cached_bestUAV(:) ~= bestUAV(:))
-            cached_phi_t = computePhasePhi(iter, params.FES_max, bestUAV, User, priorities, params, RRH);
-            cached_bestUAV = bestUAV;
+        % 序参量缓存：bestUAV不变则复用；no_phi_t 变体跳过计算
+        if params.enable_phi_t
+            if size(cached_bestUAV, 1) ~= size(bestUAV, 1) || isempty(cached_bestUAV) || any(cached_bestUAV(:) ~= bestUAV(:))
+                cached_phi_t = computePhasePhi(iter, params.FES_max, bestUAV, User, priorities, params, RRH);
+                cached_bestUAV = bestUAV;
+            end
+            phi_t = cached_phi_t;
+        else
+            phi_t = 1.0;
         end
-        phi_t = cached_phi_t;
-        pv_accept = 1 / (1 + exp(-(params.pv_mix_logit_k * (phi_t - params.pv_mix_logit_c))));
+        if params.enable_phi_t
+            pv_accept = 1 / (1 + exp(-(params.pv_mix_logit_k * (phi_t - params.pv_mix_logit_c))));
+        else
+            pv_accept = 1.0;  % 无 φ_t 门控时 PV 交换 100% 触发
+        end
 
         for g = 1:n_subpops
             capturability_g(g) = calcCapturability(subpops{g}, iter, params.FES_max, g);
@@ -169,7 +177,11 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                     mem_ref_pos = mem_candidate(uav_idx, :);
 
                     if params.enable_goa_repulsion
-                        q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.35 * phi_t)));
+                        if params.enable_phi_t
+                            q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.35 * phi_t)));
+                        else
+                            q_eff = params.subpop_params.q(g);
+                        end
                         if rand >= q_eff
                             pos = goaUShape(subpops{g}, mem_ref_pos, t, X_init, g);
                         else
@@ -216,7 +228,11 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 end
 
                 if params.enable_goa_turn
-                    cap_eff = capturability_g(g) * (0.75 + 0.25 * (1 - phi_t));
+                    if params.enable_phi_t
+                        cap_eff = capturability_g(g) * (0.75 + 0.25 * (1 - phi_t));
+                    else
+                        cap_eff = capturability_g(g);
+                    end
                     for uav_idx = 1:N_UAV
                         pos = goaTurn(cand_i(uav_idx, :), global_leader(uav_idx, :), cap_eff, t);
                         pos = max(Lb, min(Ub, pos));
@@ -354,17 +370,27 @@ function params = configureAblationVariant(params, variant)
     params.enable_goa_turn = true;
     params.enable_elite_migration = true;
     params.enable_random_global_leader = false;
-    params.enable_archive_final_selection = true;
     params.enable_pv_interpolation = true;
+    params.enable_phi_t = true;  % φ_t 统一调度（核心创新）
 
     switch variant
         case 'proposed'
-        case {'no_pareto', 'no_pareto_leader'}
-            params.enable_pareto_leader = false;
+            % 全部开启，无修改
+        case 'no_phi_t'
+            % 关闭 φ_t 统一调度：GOA 用固定 q(g)、goaTurn 用固定 capturability、PV 交换概率恒为 1
+            params.enable_phi_t = false;
+        case {'no_pv_interpolation', 'no_pv_exchange'}
+            params.enable_pv_interpolation = false;
+        case {'no_migration', 'no_elite_migration'}
+            params.enable_elite_migration = false;
         case {'no_subpop', 'no_multi_subpop'}
+            % 多子群关闭时，PV 交换和精英迁移自动失效
             params.enable_multi_subpop = false;
             params.enable_elite_migration = false;
             params.enable_pv_interpolation = false;
+        % --- 向后兼容：保留旧变体名 ---
+        case {'no_pareto', 'no_pareto_leader'}
+            params.enable_pareto_leader = false;
         case 'no_goa'
             params.enable_goa_repulsion = false;
             params.enable_goa_turn = false;
@@ -372,10 +398,6 @@ function params = configureAblationVariant(params, variant)
             params.enable_goa_repulsion = false;
         case 'no_goa_turn'
             params.enable_goa_turn = false;
-        case {'no_migration', 'no_elite_migration'}
-            params.enable_elite_migration = false;
-        case {'no_pv_interpolation', 'no_pv_exchange'}
-            params.enable_pv_interpolation = false;
         otherwise
             error('Unknown ablation variant: %s', variant);
     end

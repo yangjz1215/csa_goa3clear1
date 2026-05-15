@@ -105,16 +105,12 @@ function results = run_ablation(varargin)
     params.subpop_params.q = [0.6, 0.5, 0.4];
     params.subpop_params.beta = [0.8, 0.7, 0.6];
 
-    params.enable_early_stop = false;
-    params.enable_smart_stop = false;
-
     variants = {
         'proposed', 'Proposed (full)';
-        'no_pareto', 'Hard w/o Pareto: scalar leader only, no archive final selection';
-        'no_subpop', 'Hard w/o multi-subpop: single pop, no K×3, no migration';
-        'no_goa', 'Hard w/o GOA: raw sampling candidates, no GOA shape, no goaTurn';
-        'no_migration', 'Hard w/o elite migration';
-        'no_pv_interpolation', 'Hard w/o PV Interpolation Exchange'
+        'no_phi_t', 'w/o φ_t Unified Scheduling';
+        'no_pv_interpolation', 'w/o PV Interpolation Exchange';
+        'no_migration', 'w/o Elite Migration';
+        'no_subpop', 'w/o Multi-Subpopulation';
     };
 
     reference_point = [1.0, 100000];

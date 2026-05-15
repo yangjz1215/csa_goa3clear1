@@ -17,8 +17,6 @@ function results = run_ablation_para(varargin)
     n_workers = p.Results.n_workers;
 
     [User, priorities, N_User, N_UAV, RRH, RRH_type, N_RRH, UAV_type, Ub, Lb, params, map_data] = loadExperimentContext(project_dir, map_name);
-    params.enable_early_stop = false;
-    params.enable_smart_stop = false;
     params.enable_migration_log = false;
 
     fprintf('--- 加载固定地图: %s ---\n', map_name);
@@ -27,13 +25,12 @@ function results = run_ablation_para(varargin)
 
     variants = {
         'proposed',              'Proposed cSA-GOA (full)';
-        'no_pareto',             'w/o Pareto Leader';
-        'no_subpop',             'w/o Multi-Subpopulation';
-        'no_goa',                'w/o GOA (repulsion + turn)';
-        'no_migration',          'w/o Elite Migration';
+        'no_phi_t',              'w/o φ_t Unified Scheduling';
         'no_pv_interpolation',   'w/o PV Interpolation Exchange';
+        'no_migration',          'w/o Elite Migration';
+        'no_subpop',             'w/o Multi-Subpopulation';
     };
-    fprintf('消融实验: 硬消融变体共 %d 个\n', size(variants, 1));
+    fprintf('消融实验: 变体共 %d 个\n', size(variants, 1));
 
     if isempty(gcp('nocreate'))
         fprintf('启动并行池 (%d workers)...\n', n_workers);
