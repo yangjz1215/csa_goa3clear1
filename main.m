@@ -111,16 +111,11 @@ params.FES_max = 300;
 params.K = 40;
 
 hyperparam_file = 'best_algo_hyperparams.mat';
+opt_params = [];
 if exist(hyperparam_file, 'file')
     opt_params = load(hyperparam_file);
-    params.K = opt_params.best_K;
-    params.subpop_params.q = [opt_params.best_q, opt_params.best_q, opt_params.best_q];
-    fprintf('🎯 [动态注入] 已加载最优超参数 K=%d, q=%.1f\n', params.K, opt_params.best_q);
 elseif exist(fullfile('experiments', hyperparam_file), 'file')
     opt_params = load(fullfile('experiments', hyperparam_file));
-    params.K = opt_params.best_K;
-    params.subpop_params.q = [opt_params.best_q, opt_params.best_q, opt_params.best_q];
-    fprintf('🎯 [动态注入] 已加载最优超参数 K=%d, q=%.1f\n', params.K, opt_params.best_q);
 end
 
 params.enable_early_stop = true;
@@ -136,6 +131,24 @@ switch optimization_method
             'beta', [0.2, 0.3, 0.1], ...
             'sigma0', [25, 30, 20]);
         fprintf('使用固定参数方法\n');
+end
+
+% 动态注入：从 best_algo_hyperparams.mat 加载最优超参数，覆盖默认值
+if ~isempty(opt_params)
+    params.K = opt_params.best_K;
+    params.subpop_params.q = [opt_params.best_q, opt_params.best_q, opt_params.best_q];
+    fprintf('🎯 [动态注入] 已加载最优超参数 K=%d, q=%.1f\n', params.K, opt_params.best_q);
+    if isfield(opt_params, 'best_phase_w_progress')
+        params.phase_w_progress = opt_params.best_phase_w_progress;
+        params.phase_w_cov = opt_params.best_phase_w_cov;
+        params.phase_w_inner = opt_params.best_phase_w_inner;
+        fprintf('🎯 [动态注入] phi_t 权重: progress=%.3f, cov=%.3f, inner=%.3f\n', ...
+            opt_params.best_phase_w_progress, opt_params.best_phase_w_cov, opt_params.best_phase_w_inner);
+    end
+    if isfield(opt_params, 'best_beta')
+        params.subpop_params.beta = [opt_params.best_beta, opt_params.best_beta, opt_params.best_beta];
+        fprintf('🎯 [动态注入] beta=%.2f\n', opt_params.best_beta);
+    end
 end
 
 %% 3. 运行算法
