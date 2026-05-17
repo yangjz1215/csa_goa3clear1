@@ -1,6 +1,6 @@
 function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, D_UU, D_RU, User, priorities, params)
-%PVINTERPOLATIONEXCHANGE 子群PV凸组合采样：每对子群产生2个候选（贪心+随机）
-%   贪心候选在α网格上搜索最优标量J；随机候选保证插值方向的多样性
+%PVINTERPOLATIONEXCHANGE 子群PV凸组合采样：每对子群产生贪心候选
+%   贪心候选在α网格上搜索最优标量J
 %   接口不变：返回struct数组，含UAV_pos/alpha/pair/source字段
 
     n_subpops = length(subpops);
@@ -66,17 +66,6 @@ function mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH,
             mixed_candidates = [mixed_candidates; cand];
         end
 
-        % --- 候选B：随机α采样，保证插值方向多样性 ---
-        alpha_rand = rand();
-        [uav_pos_r, valid_r] = mixAndSample(mu_a, sigma_a, mu_b, sigma_b, alpha_rand, N_UAV, Ub, Lb, D_UU);
-        if valid_r
-            cand_r = struct();
-            cand_r.UAV_pos = uav_pos_r;
-            cand_r.alpha = alpha_rand;
-            cand_r.pair = [idx_a, idx_b];
-            cand_r.source = 'pv_random';
-            mixed_candidates = [mixed_candidates; cand_r];
-        end
     end
 end
 

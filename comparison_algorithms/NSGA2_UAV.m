@@ -5,7 +5,7 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = NSGA2_UAV(
     end
 
     if isfield(params, 'K')
-        pop_size = params.K;
+        pop_size = params.K * 3;
     else
         pop_size = 40;
     end

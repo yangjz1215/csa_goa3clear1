@@ -192,7 +192,7 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
 
                     if params.enable_goa_repulsion
                         if params.enable_phi_t
-                            q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.35 * phi_t)));
+                            q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.50 * phi_t)));
                         else
                             q_eff = params.subpop_params.q(g);
                         end
@@ -243,7 +243,7 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
 
                 if params.enable_goa_turn
                     if params.enable_phi_t
-                        cap_eff = capturability_g(g) * (0.75 + 0.25 * (1 - phi_t));
+                        cap_eff = capturability_g(g) * (0.65 + 0.35 * (1 - phi_t));
                     else
                         cap_eff = capturability_g(g);
                     end

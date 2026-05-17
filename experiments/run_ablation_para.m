@@ -292,21 +292,23 @@ function pf_norm = normalizeFront(pareto_front, priorities, N_User, N_UAV, param
 end
 
 function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV, params, n_runs, title_text)
-    fprintf('\n========== 开始执行 %s Min-Max 归一化 ==========\n', title_text);
+    fprintf('\n========== 开始执行 %s 归一化 + Leave-One-Out IGD ==========\n', title_text);
 
     field_names = fieldnames(results);
     valid_names = {};
-    all_points_norm = [];
 
+    % Step 1: 归一化所有前沿，按算法收集
+    all_fronts = struct();
     for i = 1:length(field_names)
         name = field_names{i};
         if isstruct(results.(name)) && isfield(results.(name), 'pareto_fronts')
             valid_names{end + 1} = name; %#ok<AGROW>
+            all_fronts.(name) = [];
             for run = 1:length(results.(name).pareto_fronts)
                 pf = results.(name).pareto_fronts{run};
                 if ~isempty(pf)
                     pf_norm = normalizeFront(pf, priorities, N_User, N_UAV, params);
-                    all_points_norm = [all_points_norm; pf_norm]; %#ok<AGROW>
+                    all_fronts.(name) = [all_fronts.(name); pf_norm]; %#ok<AGROW>
                     results.(name).pareto_fronts_norm{run} = pf_norm;
                 else
                     results.(name).pareto_fronts_norm{run} = [];
@@ -315,7 +317,6 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
         end
     end
 
-    true_front_norm = extractNonDominated(unique(all_points_norm, 'rows'));
     ref_point_norm = [1.1, 1.1, 1.1];
 
     fprintf('\n========== %s最终汇总表格 (统一口径) ==========\n', title_text);
@@ -323,9 +324,24 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
         'Name', 'Utility', 'Latency(s)', 'Energy(J)', 'HV(Norm)↑', 'IGD(Norm)↓', 'Spread↑');
     fprintf('%s\n', repmat('-', 1, 120));
 
+    % Step 2: Leave-one-out 计算每个算法的指标
     for i = 1:length(valid_names)
         name = valid_names{i};
         r = results.(name);
+
+        % 构建排除自身的参考前沿
+        other_points = [];
+        for j = 1:length(valid_names)
+            if j ~= i
+                other_points = [other_points; all_fronts.(valid_names{j})]; %#ok<AGROW>
+            end
+        end
+        if ~isempty(other_points)
+            ref_front = extractNonDominated(unique(other_points, 'rows'));
+        else
+            ref_front = [];
+        end
+
         hvs = nan(n_runs, 1);
         igds = nan(n_runs, 1);
         spreads = nan(n_runs, 1);
@@ -333,7 +349,7 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
         for run = 1:length(r.pareto_fronts_norm)
             pf_norm = r.pareto_fronts_norm{run};
             if ~isempty(pf_norm)
-                metrics = calculate_all_metrics(pf_norm, true_front_norm, ref_point_norm);
+                metrics = calculate_all_metrics(pf_norm, ref_front, ref_point_norm);
                 hvs(run) = metrics.hv;
                 igds(run) = metrics.igd;
                 spreads(run) = metrics.spread;
@@ -346,6 +362,10 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
         results.(name).std_igd_norm = std(igds, 0, 'omitnan');
         results.(name).mean_spread_norm = mean(spreads, 'omitnan');
         results.(name).std_spread_norm = std(spreads, 0, 'omitnan');
+
+        results.(name).igd_values = igds;
+        results.(name).spread_values = spreads;
+        results.(name).hv_values = hvs;
 
         fprintf('%-14s | %-10.2f | %-12.2f | %-12.2f | %-5.4f±%-5.4f | %-5.4f±%-5.4f | %-8.4f\n', ...
             name, r.mean_utility, r.mean_latency, r.mean_energy, mean(hvs, 'omitnan'), std(hvs, 0, 'omitnan'), mean(igds, 'omitnan'), std(igds, 0, 'omitnan'), mean(spreads, 'omitnan'));

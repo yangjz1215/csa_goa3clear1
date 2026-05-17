@@ -198,9 +198,13 @@ function results = run_comparison_para(varargin)
 
     results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV, params, n_runs, '对比实验');
 
-    fprintf('\n========== Wilcoxon Rank Sum Test on HV (cSA-GOA vs. Others) ==========\n');
-    wilcoxon_table = computeWilcoxonTable(results, algorithms);
-    results.wilcoxon_table = wilcoxon_table;
+    fprintf('\n========== Wilcoxon Rank Sum Test (cSA-GOA vs. Others) ==========\n');
+    wilcoxon_table_hv = computeWilcoxonTable(results, algorithms, 'hv_values');
+    wilcoxon_table_igd = computeWilcoxonTable(results, algorithms, 'igd_values');
+    wilcoxon_table_spread = computeWilcoxonTable(results, algorithms, 'spread_values');
+    results.wilcoxon_table_hv = wilcoxon_table_hv;
+    results.wilcoxon_table_igd = wilcoxon_table_igd;
+    results.wilcoxon_table_spread = wilcoxon_table_spread;
 
     results_file = fullfile(project_dir, 'experiments', ['comparison_results_para_', map_name, '_', datestr(now, 'yyyymmdd_HHMMSS'), '.mat']);
     save(results_file, 'results', 'map_data', 'params');
@@ -369,21 +373,23 @@ function pf_norm = normalizeFront(pareto_front, priorities, N_User, N_UAV, param
 end
 
 function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV, params, n_runs, title_text)
-    fprintf('\n========== 开始执行 %s Min-Max 归一化 ==========\n', title_text);
+    fprintf('\n========== 开始执行 %s 归一化 + Leave-One-Out IGD ==========\n', title_text);
 
     field_names = fieldnames(results);
     valid_names = {};
-    all_points_norm = [];
 
+    % Step 1: 归一化所有前沿，按算法收集
+    all_fronts = struct();
     for i = 1:length(field_names)
         name = field_names{i};
         if isstruct(results.(name)) && isfield(results.(name), 'pareto_fronts')
             valid_names{end + 1} = name; %#ok<AGROW>
+            all_fronts.(name) = [];
             for run = 1:length(results.(name).pareto_fronts)
                 pf = results.(name).pareto_fronts{run};
                 if ~isempty(pf)
                     pf_norm = normalizeFront(pf, priorities, N_User, N_UAV, params);
-                    all_points_norm = [all_points_norm; pf_norm]; %#ok<AGROW>
+                    all_fronts.(name) = [all_fronts.(name); pf_norm]; %#ok<AGROW>
                     results.(name).pareto_fronts_norm{run} = pf_norm;
                 else
                     results.(name).pareto_fronts_norm{run} = [];
@@ -392,7 +398,6 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
         end
     end
 
-    true_front_norm = extractNonDominated(unique(all_points_norm, 'rows'));
     ref_point_norm = [1.1, 1.1, 1.1];
 
     fprintf('\n========== %s最终汇总表格 (统一口径) ==========\n', title_text);
@@ -400,9 +405,24 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
         'Name', 'Utility', 'Latency(s)', 'Energy(J)', 'HV(Norm)↑', 'IGD(Norm)↓', 'Spread↑');
     fprintf('%s\n', repmat('-', 1, 120));
 
+    % Step 2: Leave-one-out 计算每个算法的指标
     for i = 1:length(valid_names)
         name = valid_names{i};
         r = results.(name);
+
+        % 构建排除自身的参考前沿
+        other_points = [];
+        for j = 1:length(valid_names)
+            if j ~= i
+                other_points = [other_points; all_fronts.(valid_names{j})]; %#ok<AGROW>
+            end
+        end
+        if ~isempty(other_points)
+            ref_front = extractNonDominated(unique(other_points, 'rows'));
+        else
+            ref_front = [];
+        end
+
         hvs = nan(n_runs, 1);
         igds = nan(n_runs, 1);
         spreads = nan(n_runs, 1);
@@ -410,7 +430,7 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
         for run = 1:length(r.pareto_fronts_norm)
             pf_norm = r.pareto_fronts_norm{run};
             if ~isempty(pf_norm)
-                metrics = calculate_all_metrics(pf_norm, true_front_norm, ref_point_norm);
+                metrics = calculate_all_metrics(pf_norm, ref_front, ref_point_norm);
                 hvs(run) = metrics.hv;
                 igds(run) = metrics.igd;
                 spreads(run) = metrics.spread;
@@ -466,21 +486,26 @@ function pf = extractNonDominated(points)
     pf = points(~is_dominated, :);
 end
 
-function wilcoxon_table = computeWilcoxonTable(results, algorithms)
+function wilcoxon_table = computeWilcoxonTable(results, algorithms, metric_field)
+    if nargin < 3
+        metric_field = 'hv_values';
+    end
+
     n_algs = size(algorithms, 1);
     alg_names = algorithms(:, 1);
     alg_labels = algorithms(:, 2);
 
     ref_name = 'cSA_GOA';
-    if ~isfield(results, ref_name) || ~isfield(results.(ref_name), 'hv_values')
-        warning('cSA_GOA HV data not found, skipping Wilcoxon test.');
+    if ~isfield(results, ref_name) || ~isfield(results.(ref_name), metric_field)
+        warning('cSA_GOA %s data not found, skipping Wilcoxon test.', metric_field);
         wilcoxon_table = [];
         return;
     end
 
-    ref_hv = results.(ref_name).hv_values(:);
-    ref_hv = ref_hv(~isnan(ref_hv));
+    ref_vals = results.(ref_name).(metric_field)(:);
+    ref_vals = ref_vals(~isnan(ref_vals));
 
+    fprintf('\n--- Wilcoxon on %s ---\n', metric_field);
     fprintf('%-40s | %-12s | %-12s | %-14s\n', 'Comparison', 'p-value', 'h (p<0.05)', 'Significant');
     fprintf('%s\n', repmat('-', 1, 85));
 
@@ -490,16 +515,16 @@ function wilcoxon_table = computeWilcoxonTable(results, algorithms)
     for a = 1:n_algs
         alg_name = alg_names{a};
         if strcmp(alg_name, ref_name), continue; end
-        if ~isfield(results, alg_name) || ~isfield(results.(alg_name), 'hv_values'), continue; end
+        if ~isfield(results, alg_name) || ~isfield(results.(alg_name), metric_field), continue; end
 
-        cmp_hv = results.(alg_name).hv_values(:);
-        cmp_hv = cmp_hv(~isnan(cmp_hv));
+        cmp_vals = results.(alg_name).(metric_field)(:);
+        cmp_vals = cmp_vals(~isnan(cmp_vals));
 
-        if length(ref_hv) < 3 || length(cmp_hv) < 3
+        if length(ref_vals) < 3 || length(cmp_vals) < 3
             p_val = NaN;
             h = NaN;
         else
-            [p_val, h] = wilcoxon_test(ref_hv, cmp_hv);
+            [p_val, h] = wilcoxon_test(ref_vals, cmp_vals);
         end
 
         sig_str = '';

@@ -42,8 +42,7 @@ params.UAV_type = UAV_type;
 subpops = initSubpopulations(N_UAV, User, RRH, priorities, params.subpop_params, Ub, Lb, params.cover_radius, params.D_RU);
 
 if isfield(params, 'K')
-    params.K = round(params.K);
-    params.K = max(20, min(60, params.K));
+    params.K = max(10, round(params.K));
 end
 
 mem_matrix = cell(3, 1);
@@ -155,7 +154,7 @@ for iter = 2:params.FES_max
                 end
                 mem_ref_pos = mem_candidate(uav_idx, :);
 
-                q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.35 * phi_t)));  % 保留子群差异化分工
+                q_eff = max(0.05, min(0.95, params.subpop_params.q(g) * (1 - 0.50 * phi_t)));  % 保留子群差异化分工
                 if rand >= q_eff
                     pos = goaUShape(subpops{g}, mem_ref_pos, t, X_init, g);
                 else
@@ -201,7 +200,7 @@ for iter = 2:params.FES_max
                     subpop_best_uav = leader_G3(uav_idx, :);
                 end
 
-                cap_eff = capturability_g(g) * (0.75 + 0.25 * (1 - phi_t));  % 保障Pareto leader引导力，维持前沿覆盖
+                cap_eff = capturability_g(g) * (0.65 + 0.35 * (1 - phi_t));  % 保障Pareto leader引导力，维持前沿覆盖
                 pos = goaTurn(cand_i(uav_idx, :), subpop_best_uav, cap_eff, t);
                 pos = projectToFeasiblePosition(pos, cand_i(uav_idx, :), cand_i, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb);
                 candidates(i, uav_idx, :) = pos(:)';
