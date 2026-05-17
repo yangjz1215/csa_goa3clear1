@@ -1,9 +1,5 @@
 function subpops = initSubpopulations(N_UAV, User, RRH, priorities, subpop_params, Ub, Lb, cover_radius, D_RU)
     subpops = cell(3,1);
-    high_users = User(priorities>=3,:);
-    all_users = User;
-
-    scene_size = Ub - Lb;
     D_UU = 10;
 
     start_point = (Ub + Lb) / 2;
@@ -55,77 +51,6 @@ function pos = generateCenteredUAV(N_UAV, start_point, RRH, D_UU, D_RU, Ub, Lb, 
             pos(i,:) = candidate;
         else
             pos(i,:) = start_point;
-        end
-    end
-end
-
-% 辅助函数：生成分散的位置
-function pos = generateDispersedPositions(N, Lb, Ub, min_dist)
-    pos = zeros(N, 2);
-    max_attempts = 1000;
-    
-    for i = 1:N
-        attempts = 0;
-        valid = false;
-        while ~valid && attempts < max_attempts
-            candidate = Lb + (Ub - Lb) .* rand(1, 2);
-            if i == 1
-                valid = true;
-            else
-                dists = sqrt(sum((pos(1:i-1,:) - candidate).^2, 2));
-                valid = all(dists >= min_dist);
-            end
-            attempts = attempts + 1;
-        end
-        if ~valid
-            % 如果找不到，使用网格点
-            grid_size = ceil(sqrt(N));
-            x_idx = mod(i-1, grid_size);
-            y_idx = floor((i-1) / grid_size);
-            candidate = Lb + (Ub - Lb) .* [x_idx/(grid_size-1), y_idx/(grid_size-1)];
-        end
-        pos(i,:) = candidate;
-    end
-end
-
-% 辅助函数：在场景角落初始化
-function pos = initializeAtCorners(N, Lb, Ub, min_dist)
-    pos = zeros(N, 2);
-    corners = [Lb; [Ub(1), Lb(2)]; [Lb(1), Ub(2)]; Ub];  % 四个角落
-    
-    for i = 1:N
-        corner_idx = randi(4);
-        corner = corners(corner_idx, :);
-        offset = 200 * (rand(1,2) - 0.5);
-        candidate = corner + offset;
-        candidate = max(Lb, min(Ub, candidate));
-        pos(i,:) = candidate;
-    end
-    pos = enforceDispersion(pos, min_dist, Ub, Lb);
-end
-
-% 辅助函数：强制分散处理
-function pos = enforceDispersion(pos, min_dist, Ub, Lb)
-    N = size(pos, 1);
-    max_iter = 50;
-    
-    for iter = 1:max_iter
-        moved = false;
-        for i = 1:N
-            for j = i+1:N
-                dist = norm(pos(i,:) - pos(j,:));
-                if dist < min_dist
-                    dir = (pos(i,:) - pos(j,:)) / (dist + 1e-6);
-                    delta = (min_dist - dist) / 2;
-                    pos(i,:) = pos(i,:) + dir * delta;
-                    pos(j,:) = pos(j,:) - dir * delta;
-                    moved = true;
-                end
-            end
-            pos(i,:) = max(Lb, min(Ub, pos(i,:)));
-        end
-        if ~moved
-            break;
         end
     end
 end

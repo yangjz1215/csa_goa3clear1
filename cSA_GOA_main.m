@@ -473,26 +473,6 @@ function solution = selectMaxUtilitySolution(pareto_archive, fallback_uav, fallb
     end
 end
 
-function cov_ratio = calcCoverageWithRRH(UAV_pos, User_pos, UAV_radius, RRH, RRH_radius)
-    covered = 0;
-    for i = 1:size(User_pos, 1)
-        dists_uav = sqrt(sum((UAV_pos - User_pos(i, :)).^2, 2));
-        covered_by_uav = any(dists_uav <= UAV_radius);
-
-        if size(RRH, 1) > 0
-            dists_rrh = sqrt(sum((RRH - User_pos(i, :)).^2, 2));
-            covered_by_rrh = any(dists_rrh <= RRH_radius);
-        else
-            covered_by_rrh = false;
-        end
-
-        if covered_by_uav || covered_by_rrh
-            covered = covered + 1;
-        end
-    end
-    cov_ratio = covered / size(User_pos, 1);
-end
-
 function new_pos = goaUShape(subpop, mem_ref_pos, t, X_init, g)
     r2 = 2 * pi * rand;
     a_coeffs = [0.6, 0.7, 0.5];

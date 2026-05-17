@@ -417,55 +417,6 @@ function params = configureAblationVariant(params, variant)
     end
 end
 
-function pos = projectToFeasiblePosition(pos, fallback_pos, candidate_positions, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb)
-    pos = max(Lb, min(Ub, pos));
-    valid_pos = true;
-
-    for rrh_idx = 1:N_RRH
-        if norm(pos - RRH(rrh_idx, :)) < params.D_RU
-            valid_pos = false;
-            break;
-        end
-    end
-
-    if valid_pos
-        for other_uav = 1:N_UAV
-            if other_uav ~= uav_idx
-                other_pos = candidate_positions(other_uav, :);
-                if norm(pos - other_pos) < params.D_UU
-                    valid_pos = false;
-                    break;
-                end
-            end
-        end
-    end
-
-    if ~valid_pos
-        pos = fallback_pos;
-    end
-end
-
-function tf = isFeasibleCandidate(candidate_pos, RRH, N_RRH, N_UAV, params)
-    tf = true;
-
-    for rrh_idx = 1:N_RRH
-        dists_rrh = sqrt(sum((candidate_pos - RRH(rrh_idx, :)).^2, 2));
-        if any(dists_rrh < params.D_RU)
-            tf = false;
-            return;
-        end
-    end
-
-    for uav_a = 1:N_UAV
-        for uav_b = uav_a + 1:N_UAV
-            if norm(candidate_pos(uav_a, :) - candidate_pos(uav_b, :)) < params.D_UU
-                tf = false;
-                return;
-            end
-        end
-    end
-end
-
 function solution = buildSolutionStruct(uav_pos, scalar_fitness, User, priorities, params, label)
     [util, lat, nrg, success_rate] = calcMEC_Objectives(uav_pos, User, priorities, params);
     solution = struct( ...

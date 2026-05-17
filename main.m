@@ -171,12 +171,6 @@ plot(1:actual_iter, energy_consumption(1:actual_iter), 'r-','LineWidth',1.5);
 xlabel('迭代次数'); ylabel('总能耗（J）');
 title('无人机总能耗变化'); grid on;
 
-% 计算能耗用于Pareto图
-center_point = repmat([500, 500], N_UAV, 1);
-fly_distances = sqrt(sum((bestUAV - center_point).^2, 2));
-total_energy_consumed = params.k_move * sum(fly_distances);
-final_cov_total = calcCoverageWithRRH(bestUAV, User, params.cover_radius, RRH, params.RRH_radius);
-
 % Pareto前沿分析 (3D)
 if ~isempty(pareto_archive)
     arch_util = [pareto_archive.Utility];
@@ -259,23 +253,3 @@ if ~isempty(pareto_archive)
     fprintf('   效用: %.1f | 时延: %.2f s | 能耗: %.2f J\n', arch_util(knee_idx), arch_lat(knee_idx), arch_energy(knee_idx));
 end
 fprintf('=====================================\n');
-
-function cov_ratio = calcCoverageWithRRH(UAV_pos, User_pos, UAV_radius, RRH, RRH_radius)
-    covered = 0;
-    for i = 1:size(User_pos,1)
-        dists_uav = sqrt(sum((UAV_pos - User_pos(i,:)).^2, 2));
-        covered_by_uav = any(dists_uav <= UAV_radius);
-        
-        if size(RRH,1) > 0
-            dists_rrh = sqrt(sum((RRH - User_pos(i,:)).^2, 2));
-            covered_by_rrh = any(dists_rrh <= RRH_radius);
-        else
-            covered_by_rrh = false;
-        end
-        
-        if covered_by_uav || covered_by_rrh
-            covered = covered + 1;
-        end
-    end
-    cov_ratio = covered / size(User_pos,1);
-end
