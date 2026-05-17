@@ -17,7 +17,7 @@ function spread_value = spread(obtained_front, true_front)
         extreme_last = sorted_true(end, :);
     end
 
-    [sorted_obtained, idx_sort] = sortrows(obtained_front, 1);
+    sorted_obtained = sortrows(obtained_front, 1);
 
     d_extreme_first = inf;
     for i = 1:n_points

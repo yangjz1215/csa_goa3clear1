@@ -1,5 +1,5 @@
 function coverage_metrics = calculate_coverage_metrics(UAV_pos, User, priorities, params, RRH)
-    if nargin < 6
+    if nargin < 5
         RRH = [];
     end
 
