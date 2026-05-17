@@ -33,6 +33,10 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
     end
     params = configureAblationVariant(params, variant);
 
+    % [DEBUG] 运行时验证变体标志是否正确生效
+    fprintf('[ABLATION_DEBUG] variant=%s | enable_phi_t=%d | enable_pv_interpolation=%d | enable_elite_migration=%d | enable_multi_subpop=%d\n', ...
+        variant, params.enable_phi_t, params.enable_pv_interpolation, params.enable_elite_migration, params.enable_multi_subpop);
+
     subpops = initSubpopulations(N_UAV, User, RRH, priorities, params.subpop_params, Ub, Lb, params.cover_radius, params.D_RU);
 
     if ~params.enable_multi_subpop
@@ -40,8 +44,12 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
         params.G_weights = 1.0;
         params.subpop_params.sigma0 = mean(params.subpop_params.sigma0, 1);
         params.subpop_params.sigma_min = mean(params.subpop_params.sigma_min(:));
-        params.subpop_params.w_inertia = mean(params.subpop_params.w_inertia(:));
-        params.subpop_params.c = mean(params.subpop_params.c(:));
+        if isfield(params.subpop_params, 'w_inertia')
+            params.subpop_params.w_inertia = mean(params.subpop_params.w_inertia(:));
+        end
+        if isfield(params.subpop_params, 'c')
+            params.subpop_params.c = mean(params.subpop_params.c(:));
+        end
         params.subpop_params.q = mean(params.subpop_params.q(:));
         params.subpop_params.beta = mean(params.subpop_params.beta(:));
         n_subpops = 1;
@@ -133,6 +141,12 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
             pv_accept = 1 / (1 + exp(-(params.pv_mix_logit_k * (phi_t - params.pv_mix_logit_c))));
         else
             pv_accept = 1.0;  % 无 φ_t 门控时 PV 交换 100% 触发
+        end
+
+        % [DEBUG] 仅在迭代2打印一次，验证 phi_t/pv_accept/n_subpops 实际值
+        if iter == 2
+            fprintf('[ABLATION_DEBUG] iter=%d phi_t=%.4f pv_accept=%.4f n_subpops=%d K=%d\n', ...
+                iter, phi_t, pv_accept, n_subpops, params.K);
         end
 
         for g = 1:n_subpops
