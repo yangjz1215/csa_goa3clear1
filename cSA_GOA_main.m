@@ -315,7 +315,7 @@ for iter = 2:params.FES_max
             iter, params.FES_max, scalar_best_fit, scalar_util, scalar_lat, scalar_nrg, length(pareto_archive));
     end
 
-    if mod(iter, 5) == 0 || iter == params.FES_max
+    if mod(iter, 3) == 0 || iter == params.FES_max
         pareto_updated_this_iter = false;
 
         do_pv_mix = params.enable_pv_interpolation && params.enable_multi_subpop && ...

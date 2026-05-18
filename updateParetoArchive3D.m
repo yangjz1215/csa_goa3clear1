@@ -13,7 +13,7 @@ function [archive, is_updated] = updateParetoArchive3D(archive, new_pos, util, l
             break;
         end
 
-        if all(new_obj <= old_obj) && any(new_obj < new_obj)
+        if all(new_obj <= old_obj) && any(new_obj < old_obj)
             indices_to_remove = [indices_to_remove, i];
         end
     end
@@ -24,8 +24,15 @@ function [archive, is_updated] = updateParetoArchive3D(archive, new_pos, util, l
         is_updated = true;
     end
 
-    MAX_ARCHIVE_SIZE = 300;
+    MAX_ARCHIVE_SIZE = 500;
     if length(archive) > MAX_ARCHIVE_SIZE
+        % 截断前先做一次全局支配清理，确保档案中不含被支配解
+        archive = removeDominated(archive);
+
+        if length(archive) <= MAX_ARCHIVE_SIZE
+            return;
+        end
+
         arch_U = [archive.Utility];
         arch_L = [archive.Latency];
         arch_E = [archive.Energy];
@@ -84,4 +91,25 @@ function keep_idx = selectArchiveIndicesByCrowding3D(archive, other_indices, num
     [~, rank] = sort(cd, 'descend');
     pick = rank(1:num_to_keep);
     keep_idx = other_indices(pick);
+end
+
+function archive = removeDominated(archive)
+% 全局支配清理：移除档案中所有被支配的解
+    n = length(archive);
+    dominated = false(n, 1);
+    for i = 1:n
+        if dominated(i), continue; end
+        oi_i = [-archive(i).Utility, archive(i).Latency, archive(i).Energy];
+        for j = i+1:n
+            if dominated(j), continue; end
+            oi_j = [-archive(j).Utility, archive(j).Latency, archive(j).Energy];
+            if all(oi_i <= oi_j) && any(oi_i < oi_j)
+                dominated(j) = true;
+            elseif all(oi_j <= oi_i) && any(oi_j < oi_i)
+                dominated(i) = true;
+                break;
+            end
+        end
+    end
+    archive = archive(~dominated);
 end

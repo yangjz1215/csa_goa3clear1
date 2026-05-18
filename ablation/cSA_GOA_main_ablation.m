@@ -52,6 +52,8 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
         end
         params.subpop_params.q = mean(params.subpop_params.q(:));
         params.subpop_params.beta = mean(params.subpop_params.beta(:));
+        % 公平性：无多子群时，单种群使用 3*K 候选解以保持总评估量一致
+        params.K = params.K * 3;
         n_subpops = 1;
     else
         n_subpops = 3;
@@ -295,7 +297,7 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 iter, params.FES_max, scalar_best_fit, scalar_util, scalar_lat, scalar_nrg, length(pareto_archive));
         end
 
-        if mod(iter, 5) == 0 || iter == params.FES_max
+        if mod(iter, 3) == 0 || iter == params.FES_max
             do_pv_mix = params.enable_pv_interpolation && params.enable_multi_subpop && ...
                 iter >= 20 && mod(iter, params.pv_interpolation_interval) == 0 && ...
                 length(pareto_archive) >= params.pv_interpolation_min_archive && ...
