@@ -214,6 +214,47 @@ saveas(fig3, fullfile(output_dir, 'ablation_boxplot.fig'));
 saveas(fig3, fullfile(output_dir, 'ablation_boxplot.png'));
 close(fig3);
 
+%% ========== GD 箱线图 ==========
+has_gd = false;
+for v = 1:n_vars
+    if isfield(results, variants{v}) && isfield(results.(variants{v}), 'gd_values')
+        has_gd = true; break;
+    end
+end
+if has_gd
+    fig3b = figure('Position', [110, 110, 700, 500]);
+    set(gcf, 'Color', 'w');
+    all_gd = []; group_gd = [];
+    for i = 1:n_vars
+        v = variants{i};
+        if isfield(results, v) && isfield(results.(v), 'gd_values')
+            gd_data = results.(v).gd_values;
+            all_gd = [all_gd; gd_data(:)];
+            group_gd = [group_gd; i * ones(length(gd_data(:)), 1)];
+        end
+    end
+    hold on;
+    for i = 1:n_vars
+        idx = (group_gd == i);
+        if any(idx)
+            b = boxchart(group_gd(idx), all_gd(idx));
+            b.BoxFaceColor = colors(i, :);
+            b.BoxFaceAlpha = 0.6;
+            b.MarkerStyle = 'o';
+            b.MarkerColor = [0.2, 0.2, 0.2];
+            b.LineWidth = 1.5;
+        end
+    end
+    xticks(1:n_vars); xticklabels(labels);
+    ylabel('Generational Distance (GD) \downarrow', 'FontWeight', 'bold');
+    title(['GD Distribution (Robustness Analysis - 30 Runs) - ', scene], 'FontWeight', 'bold');
+    set(gca, 'FontName', 'Times New Roman', 'FontSize', 12, 'LineWidth', 1.2);
+    grid on; ax = gca; ax.GridLineStyle = '--'; ax.GridAlpha = 0.3; box on;
+    saveas(fig3b, fullfile(output_dir, 'ablation_gd_boxplot.fig'));
+    saveas(fig3b, fullfile(output_dir, 'ablation_gd_boxplot.png'));
+    close(fig3b);
+end
+
 %% ========== 鍥?: 缁熻妫€楠岃〃 ==========
 fig4 = figure('Position', [100, 100, 700, 300]);
 set(gcf, 'Color', 'w');

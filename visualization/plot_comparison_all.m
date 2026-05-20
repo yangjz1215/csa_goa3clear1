@@ -360,25 +360,26 @@ close(fig_success);
 
 fprintf('Runtime and success rate charts saved to %s\n', output_dir);
 
-fprintf('正在绘制 IGD 与 Spread 箱线图...\n');
+fprintf('正在绘制 IGD、GD 与 Spread 箱线图...\n');
 
 all_igd = zeros(n_runs_actual, num_algs);
+all_gd = zeros(n_runs_actual, num_algs);
 all_spread = zeros(n_runs_actual, num_algs);
 
 for a = 1:num_algs
     alg_name = algorithms{a};
-    if isfield(results.(alg_name), 'igd_values') && isfield(results.(alg_name), 'spread_values')
+    if isfield(results.(alg_name), 'igd_values')
         temp_igd = results.(alg_name).igd_values(:);
-        temp_spread = results.(alg_name).spread_values(:);
-        
         if all(isnan(temp_igd))
-            warning('算法 %s 的 IGD 数据全为 NaN！请确认底层实验代码是否正确保存了该数组。', alg_name);
+            warning('算法 %s 的 IGD 数据全为 NaN！', alg_name);
         end
-        
         all_igd(:, a) = temp_igd;
-        all_spread(:, a) = temp_spread;
-    else
-        warning('未找到 %s 的 IGD 或 Spread 数据！', alg_name);
+    end
+    if isfield(results.(alg_name), 'gd_values')
+        all_gd(:, a) = results.(alg_name).gd_values(:);
+    end
+    if isfield(results.(alg_name), 'spread_values')
+        all_spread(:, a) = results.(alg_name).spread_values(:);
     end
 end
 
@@ -402,6 +403,29 @@ box on;
 exportgraphics(fig_igd, fullfile(output_dir, 'comparison_igd_boxplot.png'), 'Resolution', 300);
 saveas(fig_igd, fullfile(output_dir, 'comparison_igd_boxplot.fig'));
 close(fig_igd);
+
+if any(all_gd(:) > 0)
+    fig_gd = figure('Position', [220, 220, 600, 450]);
+    set(gcf, 'Color', 'w');
+    hold on;
+    for a = 1:num_algs
+        b = boxchart(a * ones(size(all_gd, 1), 1), all_gd(:, a));
+        b.BoxFaceColor = colors(a, :);
+        b.BoxFaceAlpha = 0.6;
+        b.MarkerStyle = 'o';
+        b.MarkerColor = [0.2, 0.2, 0.2];
+        b.LineWidth = 1.5;
+    end
+    set(gca, 'XTick', 1:num_algs, 'XTickLabel', labels);
+    ylabel('Generational Distance (GD) \downarrow', 'FontWeight', 'bold', 'FontSize', 12);
+    title(['Convergence Evaluation: GD Metric (Lower is Better) - ', scene], 'FontWeight', 'bold', 'FontSize', 14);
+    grid on; set(gca, 'GridLineStyle', ':', 'GridAlpha', 0.6, 'FontSize', 11, 'LineWidth', 1.2);
+    set(gca, 'FontName', 'Times New Roman', 'FontSize', 11, 'LineWidth', 1.2);
+    box on;
+    exportgraphics(fig_gd, fullfile(output_dir, 'comparison_gd_boxplot.png'), 'Resolution', 300);
+    saveas(fig_gd, fullfile(output_dir, 'comparison_gd_boxplot.fig'));
+    close(fig_gd);
+end
 
 fig_spread = figure('Position', [250, 250, 600, 450]);
 set(gcf, 'Color', 'w');

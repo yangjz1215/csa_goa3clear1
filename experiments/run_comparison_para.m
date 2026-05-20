@@ -425,6 +425,7 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
 
         hvs = nan(n_runs, 1);
         igds = nan(n_runs, 1);
+        gds = nan(n_runs, 1);
         spreads = nan(n_runs, 1);
 
         for run = 1:length(r.pareto_fronts_norm)
@@ -433,6 +434,7 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
                 metrics = calculate_all_metrics(pf_norm, ref_front, ref_point_norm);
                 hvs(run) = metrics.hv;
                 igds(run) = metrics.igd;
+                gds(run) = metrics.gd;
                 spreads(run) = metrics.spread;
             end
         end
@@ -441,15 +443,19 @@ function results = finalizeNormalizedMetrics(results, priorities, N_User, N_UAV,
         results.(name).std_hv_norm = std(hvs, 0, 'omitnan');
         results.(name).mean_igd_norm = mean(igds, 'omitnan');
         results.(name).std_igd_norm = std(igds, 0, 'omitnan');
+        results.(name).mean_gd_norm = mean(gds, 'omitnan');
+        results.(name).std_gd_norm = std(gds, 0, 'omitnan');
         results.(name).mean_spread_norm = mean(spreads, 'omitnan');
         results.(name).std_spread_norm = std(spreads, 0, 'omitnan');
 
-        results.(name).igd_values = igds;
-        results.(name).spread_values = spreads;
         results.(name).hv_values = hvs;
+        results.(name).igd_values = igds;
+        results.(name).gd_values = gds;
+        results.(name).spread_values = spreads;
 
-        fprintf('%-14s | %-10.2f | %-12.2f | %-12.2f | %-5.4f±%-5.4f | %-5.4f±%-5.4f | %-8.4f\n', ...
-            name, r.mean_utility, r.mean_latency, r.mean_energy, mean(hvs, 'omitnan'), std(hvs, 0, 'omitnan'), mean(igds, 'omitnan'), std(igds, 0, 'omitnan'), mean(spreads, 'omitnan'));
+        fprintf('%-14s | %-10.2f | %-12.2f | %-12.2f | HV=%.4f±%.4f | IGD=%.4f±%.4f | GD=%.4f±%.4f | Spread=%.4f\n', ...
+            name, r.mean_utility, r.mean_latency, r.mean_energy, mean(hvs,'omitnan'), std(hvs,0,'omitnan'), ...
+            mean(igds,'omitnan'), std(igds,0,'omitnan'), mean(gds,'omitnan'), std(gds,0,'omitnan'), mean(spreads,'omitnan'));
     end
     fprintf('%s\n', repmat('-', 1, 120));
 end
