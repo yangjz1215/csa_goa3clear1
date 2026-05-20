@@ -1,5 +1,5 @@
 function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_scalar_solution, best_utility_solution, best_knee_solution] = cSA_GOA_main_ablation(N_User, User, N_RRH, RRH, RRH_type, N_UAV, UAV_type, Ub, Lb, params, priorities, variant)
-    if nargin < 13 || isempty(variant)
+    if nargin < 12 || isempty(variant)
         variant = 'proposed';
     end
 
