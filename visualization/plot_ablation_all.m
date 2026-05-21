@@ -255,6 +255,136 @@ if has_gd
     close(fig3b);
 end
 
+%% ========== IGD 箱线图 ==========
+has_igd = false;
+for v = 1:n_vars
+    if isfield(results, variants{v}) && isfield(results.(variants{v}), 'igd_values')
+        has_igd = true; break;
+    end
+end
+if has_igd
+    fig3c = figure('Position', [115, 115, 700, 500]);
+    set(gcf, 'Color', 'w');
+    all_igd = []; group_igd = [];
+    for i = 1:n_vars
+        v = variants{i};
+        if isfield(results, v) && isfield(results.(v), 'igd_values')
+            igd_data = results.(v).igd_values;
+            all_igd = [all_igd; igd_data(:)];
+            group_igd = [group_igd; i * ones(length(igd_data(:)), 1)];
+        end
+    end
+    hold on;
+    for i = 1:n_vars
+        idx = (group_igd == i);
+        if any(idx)
+            b = boxchart(group_igd(idx), all_igd(idx));
+            b.BoxFaceColor = colors(i, :);
+            b.BoxFaceAlpha = 0.6;
+            b.MarkerStyle = 'o';
+            b.MarkerColor = [0.2, 0.2, 0.2];
+            b.LineWidth = 1.5;
+        end
+    end
+    xticks(1:n_vars); xticklabels(labels);
+    ylabel('Inverted Generational Distance (IGD) \downarrow', 'FontWeight', 'bold');
+    title(['IGD Distribution (Robustness Analysis - 30 Runs) - ', scene], 'FontWeight', 'bold');
+    set(gca, 'FontName', 'Times New Roman', 'FontSize', 12, 'LineWidth', 1.2);
+    grid on; ax = gca; ax.GridLineStyle = '--'; ax.GridAlpha = 0.3; box on;
+    saveas(fig3c, fullfile(output_dir, 'ablation_igd_boxplot.fig'));
+    saveas(fig3c, fullfile(output_dir, 'ablation_igd_boxplot.png'));
+    close(fig3c);
+end
+
+%% ========== Convergence Speed (Generations to 90% Final Utility) ==========
+fig_conv_speed = figure('Position', [120, 120, 700, 500]);
+set(gcf, 'Color', 'w');
+
+gen90_means = zeros(1, n_vars);
+gen90_stds = zeros(1, n_vars);
+for v = 1:n_vars
+    variant = variants{v};
+    if ~isfield(results, variant) || ~isfield(results.(variant), 'convergence_curves')
+        continue;
+    end
+    curves = results.(variant).convergence_curves;
+    if ~iscell(curves) || isempty(curves)
+        continue;
+    end
+    gen90_vals = [];
+    for run = 1:length(curves)
+        if isempty(curves{run}), continue; end
+        c = curves{run}(:)';
+        final_val = c(end);
+        if final_val <= 0, continue; end
+        threshold = 0.9 * final_val;
+        idx90 = find(c >= threshold, 1, 'first');
+        if ~isempty(idx90)
+            gen90_vals(end+1) = idx90;
+        end
+    end
+    if ~isempty(gen90_vals)
+        gen90_means(v) = mean(gen90_vals);
+        gen90_stds(v) = std(gen90_vals);
+    end
+end
+
+hold on;
+for v = 1:n_vars
+    bar(v, gen90_means(v), 0.6, 'FaceColor', colors(v,:), 'EdgeColor', 'k', 'LineWidth', 1.2);
+end
+errorbar(1:n_vars, gen90_means, gen90_stds, 'k', 'LineStyle', 'none', 'LineWidth', 1.5, 'Capsize', 6);
+xticks(1:n_vars); xticklabels(labels);
+ylabel('Generations to 90% Final Utility', 'FontWeight', 'bold');
+title(['Convergence Speed Comparison - ', scene], 'FontWeight', 'bold');
+set(gca, 'FontName', 'Times New Roman', 'FontSize', 12, 'LineWidth', 1.2);
+grid on; ax = gca; ax.GridLineStyle = ':'; ax.GridAlpha = 0.5; box on;
+
+saveas(fig_conv_speed, fullfile(output_dir, 'ablation_convergence_speed.fig'));
+saveas(fig_conv_speed, fullfile(output_dir, 'ablation_convergence_speed.png'));
+close(fig_conv_speed);
+
+%% ========== Pareto Archive Size Comparison ==========
+fig_psize = figure('Position', [125, 125, 700, 500]);
+set(gcf, 'Color', 'w');
+
+psize_means = zeros(1, n_vars);
+psize_stds = zeros(1, n_vars);
+for v = 1:n_vars
+    variant = variants{v};
+    if ~isfield(results, variant) || ~isfield(results.(variant), 'pareto_fronts')
+        continue;
+    end
+    pfs = results.(variant).pareto_fronts;
+    sizes = [];
+    for run = 1:length(pfs)
+        if ~isempty(pfs{run})
+            sizes(end+1) = size(pfs{run}, 1);
+        end
+    end
+    if ~isempty(sizes)
+        psize_means(v) = mean(sizes);
+        psize_stds(v) = std(sizes);
+    end
+end
+
+hold on;
+for v = 1:n_vars
+    bar(v, psize_means(v), 0.6, 'FaceColor', colors(v,:), 'EdgeColor', 'k', 'LineWidth', 1.2);
+end
+errorbar(1:n_vars, psize_means, psize_stds, 'k', 'LineStyle', 'none', 'LineWidth', 1.5, 'Capsize', 6);
+xticks(1:n_vars); xticklabels(labels);
+ylabel('Pareto Archive Size', 'FontWeight', 'bold');
+title(['Pareto Archive Size Comparison (Mean \pm Std) - ', scene], 'FontWeight', 'bold');
+set(gca, 'FontName', 'Times New Roman', 'FontSize', 12, 'LineWidth', 1.2);
+grid on; ax = gca; ax.GridLineStyle = ':'; ax.GridAlpha = 0.5; box on;
+
+saveas(fig_psize, fullfile(output_dir, 'ablation_pareto_size.fig'));
+saveas(fig_psize, fullfile(output_dir, 'ablation_pareto_size.png'));
+close(fig_psize);
+
+
+
 %% ========== 鍥?: 缁熻妫€楠岃〃 ==========
 fig4 = figure('Position', [100, 100, 700, 300]);
 set(gcf, 'Color', 'w');
