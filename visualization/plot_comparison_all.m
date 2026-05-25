@@ -291,20 +291,37 @@ saveas(fig4, fullfile(output_dir, 'comparison_projections_2d.png'));
 saveas(fig4, fullfile(output_dir, 'comparison_projections_2d.fig'));
 close(fig4);
 
+num_algs = length(algorithms);
+
+% 检查旧 mat 是否有 runtime/success_rate 数据
+has_runtimes = false;
+for a = 1:num_algs
+    if isfield(results, algorithms{a}) && isfield(results.(algorithms{a}), 'runtimes')
+        has_runtimes = true; break;
+    end
+end
+
+if has_runtimes
 fprintf('正在绘制收敛速度与成功率图表...\n');
 
-num_algs = length(algorithms);
-n_runs_actual = length(results.(algorithms{1}).runtimes);
-all_runtimes = zeros(n_runs_actual, num_algs);
-all_success = zeros(n_runs_actual, num_algs);
+n_runs_actual = 0;
+for a = 1:num_algs
+    if isfield(results, algorithms{a}) && isfield(results.(algorithms{a}), 'runtimes')
+        n_runs_actual = max(n_runs_actual, length(results.(algorithms{a}).runtimes));
+    end
+end
+all_runtimes = nan(n_runs_actual, num_algs);
+all_success = nan(n_runs_actual, num_algs);
 
 for a = 1:num_algs
     alg_name = algorithms{a};
-    if isfield(results.(alg_name), 'runtimes')
-        all_runtimes(:, a) = results.(alg_name).runtimes(:);
-        all_success(:, a) = results.(alg_name).success_rates(:) * 100;
-    else
-        warning('未找到 %s 的 runtime 或 success_rate 数据，请检查 mat 文件。', alg_name);
+    if isfield(results, alg_name) && isfield(results.(alg_name), 'runtimes')
+        rt = results.(alg_name).runtimes(:);
+        all_runtimes(1:length(rt), a) = rt;
+        if isfield(results.(alg_name), 'success_rates')
+            sr = results.(alg_name).success_rates(:) * 100;
+            all_success(1:length(sr), a) = sr;
+        end
     end
 end
 
@@ -317,11 +334,13 @@ total_iterations = 300;
 if exist('params', 'var') && isfield(params, 'FES_max') && ~isempty(params.FES_max)
     total_iterations = params.FES_max;
 end
-mean_rt = mean(all_runtimes, 1) / total_iterations;
-std_rt = std(all_runtimes, 0, 1) / total_iterations;
+mean_rt = mean(all_runtimes, 1, 'omitnan') / total_iterations;
+std_rt = std(all_runtimes, 0, 1, 'omitnan') / total_iterations;
 
 for a = 1:num_algs
-    bar(a, mean_rt(a), 0.6, 'FaceColor', colors(a,:), 'EdgeColor', 'k', 'LineWidth', 1.2, 'FaceAlpha', 0.8);
+    if ~isnan(mean_rt(a))
+        bar(a, mean_rt(a), 0.6, 'FaceColor', colors(a,:), 'EdgeColor', 'k', 'LineWidth', 1.2, 'FaceAlpha', 0.8);
+    end
 end
 errorbar(1:num_algs, mean_rt, std_rt, 'k', 'LineStyle', 'none', 'LineWidth', 1.5, 'CapSize', 10);
 
@@ -340,12 +359,15 @@ set(gcf, 'Color', 'w');
 
 hold on;
 for a = 1:num_algs
-    b = boxchart(a * ones(size(all_success, 1), 1), all_success(:, a));
-    b.BoxFaceColor = colors(a, :);
-    b.BoxFaceAlpha = 0.6;
-    b.MarkerStyle = 'o';
-    b.MarkerColor = [0.2, 0.2, 0.2];
-    b.LineWidth = 1.5;
+    valid = ~isnan(all_success(:, a));
+    if any(valid)
+        b = boxchart(a * ones(sum(valid), 1), all_success(valid, a));
+        b.BoxFaceColor = colors(a, :);
+        b.BoxFaceAlpha = 0.6;
+        b.MarkerStyle = 'o';
+        b.MarkerColor = [0.2, 0.2, 0.2];
+        b.LineWidth = 1.5;
+    end
 end
 set(gca, 'XTick', 1:num_algs, 'XTickLabel', labels);
 ylabel('Task Execution Success Rate (%)', 'FontWeight', 'bold', 'FontSize', 12);
@@ -359,27 +381,45 @@ saveas(fig_success, fullfile(output_dir, 'comparison_success_rate_boxplot.fig'))
 close(fig_success);
 
 fprintf('Runtime and success rate charts saved to %s\n', output_dir);
+else
+    fprintf('Old mat file detected - skipping runtime/success_rate charts (no data)\n');
+end
 
+% 检查旧 mat 是否有 IGD/GD/Spread 数据
+has_igd = false;
+for a = 1:num_algs
+    if isfield(results, algorithms{a}) && isfield(results.(algorithms{a}), 'igd_values')
+        has_igd = true; break;
+    end
+end
+
+if has_igd
 fprintf('正在绘制 IGD、GD 与 Spread 箱线图...\n');
 
-all_igd = zeros(n_runs_actual, num_algs);
-all_gd = zeros(n_runs_actual, num_algs);
-all_spread = zeros(n_runs_actual, num_algs);
+n_runs_metrics = 0;
+for a = 1:num_algs
+    if isfield(results, algorithms{a}) && isfield(results.(algorithms{a}), 'igd_values')
+        n_runs_metrics = max(n_runs_metrics, length(results.(algorithms{a}).igd_values));
+    end
+end
+all_igd = nan(n_runs_metrics, num_algs);
+all_gd = nan(n_runs_metrics, num_algs);
+all_spread = nan(n_runs_metrics, num_algs);
 
 for a = 1:num_algs
     alg_name = algorithms{a};
+    if ~isfield(results, alg_name), continue; end
     if isfield(results.(alg_name), 'igd_values')
         temp_igd = results.(alg_name).igd_values(:);
-        if all(isnan(temp_igd))
-            warning('算法 %s 的 IGD 数据全为 NaN！', alg_name);
-        end
-        all_igd(:, a) = temp_igd;
+        all_igd(1:length(temp_igd), a) = temp_igd;
     end
     if isfield(results.(alg_name), 'gd_values')
-        all_gd(:, a) = results.(alg_name).gd_values(:);
+        gd = results.(alg_name).gd_values(:);
+        all_gd(1:length(gd), a) = gd;
     end
     if isfield(results.(alg_name), 'spread_values')
-        all_spread(:, a) = results.(alg_name).spread_values(:);
+        sp = results.(alg_name).spread_values(:);
+        all_spread(1:length(sp), a) = sp;
     end
 end
 
@@ -404,7 +444,7 @@ exportgraphics(fig_igd, fullfile(output_dir, 'comparison_igd_boxplot.png'), 'Res
 saveas(fig_igd, fullfile(output_dir, 'comparison_igd_boxplot.fig'));
 close(fig_igd);
 
-if any(all_gd(:) > 0)
+if any(all_gd(~isnan(all_gd)) > 0)
     fig_gd = figure('Position', [220, 220, 600, 450]);
     set(gcf, 'Color', 'w');
     hold on;
@@ -449,6 +489,9 @@ saveas(fig_spread, fullfile(output_dir, 'comparison_spread_boxplot.fig'));
 close(fig_spread);
 
 fprintf('IGD and Spread charts saved to %s\n', output_dir);
+else
+    fprintf('Old mat file detected - skipping IGD/GD/Spread charts (no data)\n');
+end
 
 if isfield(results, 'wilcoxon_table') && ~isempty(results.wilcoxon_table)
     fprintf('正在生成 Wilcoxon 统计显著性表格...\n');

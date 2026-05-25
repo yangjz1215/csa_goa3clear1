@@ -7,7 +7,7 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = NSGA2_UAV(
     if isfield(params, 'K')
         pop_size = params.K * 3;
     else
-        pop_size = 40;
+        pop_size = 120;
     end
 
     if ~isfield(params, 'enable_bilevel'); params.enable_bilevel = true; end

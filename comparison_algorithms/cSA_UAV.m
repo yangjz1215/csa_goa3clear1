@@ -74,12 +74,12 @@ function [best_fit, bestUAV, cg_curve, best_energy, pareto_archive] = cSA_UAV(N_
         a = 2 - iter * (2 / max_iter);
 
         for i = 1:pop_size
-            new_pos = zeros(1, n_vars);
+            new_pos = population(i, :);
             for j = 1:n_vars
                 r1 = 2 * a * rand() - a;
                 r2 = 2 * pi * rand();
                 r3 = 2 * rand();
-                new_pos(j) = new_pos(j) + r1 * sin(r2) * (r3 * bestUAV(j) - new_pos(j));
+                new_pos(j) = new_pos(j) + r1 * sin(r2) * (r3 * bestUAV(j) - population(i, j));
             end
 
             new_pos = max(Lb(1), min(Ub(1), new_pos));
