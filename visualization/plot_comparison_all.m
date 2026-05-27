@@ -493,56 +493,236 @@ else
     fprintf('Old mat file detected - skipping IGD/GD/Spread charts (no data)\n');
 end
 
-if isfield(results, 'wilcoxon_table') && ~isempty(results.wilcoxon_table)
-    fprintf('正在生成 Wilcoxon 统计显著性表格...\n');
-    plotWilcoxonTable(results.wilcoxon_table, output_dir, scene);
+if isfield(results, 'wilcoxon_table_hv') && ~isempty(results.wilcoxon_table_hv)
+    fprintf('正在生成 Wilcoxon 统计显著性表格 (HV + IGD + Spread)...\n');
+    plotWilcoxonTableCombined(results, output_dir, scene);
 end
 end
 
-function plotWilcoxonTable(wilcoxon_table, output_dir, scene)
-    n_rows = size(wilcoxon_table, 1);
+function plotWilcoxonTableCombined(results, output_dir, scene)
+    metric_names = {'HV', 'IGD', 'Spread'};
+    metric_fields = {'wilcoxon_table_hv', 'wilcoxon_table_igd', 'wilcoxon_table_spread'};
+    n_metrics = length(metric_names);
 
+    tables = cell(n_metrics, 1);
+    n_rows_all = zeros(n_metrics, 1);
+    for m = 1:n_metrics
+        if isfield(results, metric_fields{m}) && ~isempty(results.(metric_fields{m}))
+            tables{m} = results.(metric_fields{m});
+            n_rows_all(m) = size(tables{m}, 1);
+        end
+    end
+    n_rows = max(n_rows_all);
+    if n_rows == 0
+        fprintf('  无 Wilcoxon 数据，跳过\n');
+        return;
+    end
+
+    % --- 导出合并 CSV ---
     csv_file = fullfile(output_dir, 'wilcoxon_test_results.csv');
     fid = fopen(csv_file, 'w');
-    fprintf(fid, 'Comparison,p-value,h (p<0.05),Significant\n');
+    fprintf(fid, 'Comparison');
+    for m = 1:n_metrics
+        fprintf(fid, ',%s_p-value,%s_significant', metric_names{m}, metric_names{m});
+    end
+    fprintf(fid, '\n');
     for r = 1:n_rows
-        fprintf(fid, '%s,%.2e,%d,%s\n', ...
-            wilcoxon_table{r, 1}, wilcoxon_table{r, 2}, wilcoxon_table{r, 3}, wilcoxon_table{r, 4});
+        if ~isempty(tables{1}) && r <= size(tables{1}, 1)
+            cmp_name = tables{1}{r, 1};
+        elseif ~isempty(tables{2}) && r <= size(tables{2}, 1)
+            cmp_name = tables{2}{r, 1};
+        else
+            cmp_name = '';
+        end
+        fprintf(fid, '%s', cmp_name);
+        for m = 1:n_metrics
+            if ~isempty(tables{m}) && r <= size(tables{m}, 1)
+                p_val = tables{m}{r, 2};
+                h_val = tables{m}{r, 3};
+                if ~isnan(h_val) && h_val == 1
+                    sig_str = 'Yes';
+                elseif ~isnan(h_val)
+                    sig_str = 'No';
+                else
+                    sig_str = 'N/A';
+                end
+                fprintf(fid, ',%.2e,%s', p_val, sig_str);
+            else
+                fprintf(fid, ',,');
+            end
+        end
+        fprintf(fid, '\n');
     end
     fclose(fid);
     fprintf('  Wilcoxon 检验结果已导出至: %s\n', csv_file);
 
-    fig_w = figure('Position', [200, 200, 750, 180 + n_rows * 30]);
+    % --- 绘制合并表格图 ---
+    fig_w = figure('Position', [100, 100, 950, 320 + n_rows * 32]);
     set(gcf, 'Color', 'w');
 
-    col_names = {'Comparison', 'p-value', 'Significant (p<0.05)'};
-    table_data = cell(n_rows, 3);
+    col_names = {'Comparison', 'p-value', 'Sig.', 'p-value', 'Sig.', 'p-value', 'Sig.'};
+    n_cols = length(col_names);
+    table_data = cell(n_rows, n_cols);
+
     for r = 1:n_rows
-        table_data{r, 1} = wilcoxon_table{r, 1};
-        table_data{r, 2} = format_pvalue(wilcoxon_table{r, 2});
-        if ~isnan(wilcoxon_table{r, 3}) && wilcoxon_table{r, 3} == 1
-            table_data{r, 3} = 'Yes \checkmark';
-        elseif ~isnan(wilcoxon_table{r, 3})
-            table_data{r, 3} = 'No';
-        else
-            table_data{r, 3} = 'N/A';
+        % 取对比名称，截短到 "cSA-GOA vs. XXX"
+        if ~isempty(tables{1}) && r <= size(tables{1}, 1)
+            raw_name = tables{1}{r, 1};
+            paren_idx = find(raw_name == '(', 1, 'first');
+            if ~isempty(paren_idx)
+                raw_name = strtrim(raw_name(1:paren_idx-1));
+            end
+            table_data{r, 1} = raw_name;
+        end
+        col_idx = 2;
+        for m = 1:n_metrics
+            if ~isempty(tables{m}) && r <= size(tables{m}, 1)
+                table_data{r, col_idx} = format_pvalue(tables{m}{r, 2});
+                h_val = tables{m}{r, 3};
+                if ~isnan(h_val) && h_val == 1
+                    table_data{r, col_idx+1} = 'Yes';
+                elseif ~isnan(h_val)
+                    table_data{r, col_idx+1} = 'No';
+                else
+                    table_data{r, col_idx+1} = 'N/A';
+                end
+            else
+                table_data{r, col_idx} = '-';
+                table_data{r, col_idx+1} = '-';
+            end
+            col_idx = col_idx + 2;
         end
     end
 
+    % 分组列颜色
+    col_widths = {280, 110, 55, 110, 55, 110, 55};
+
     t = uitable('Data', table_data, 'ColumnName', col_names, ...
-        'Position', [20, 20, 710, 140 + n_rows * 30], ...
-        'FontName', 'Times New Roman', 'FontSize', 12, ...
-        'ColumnWidth', {350, 120, 180}, ...
-        'RowName', []);
+        'Position', [20, 40, 910, 240 + n_rows * 32], ...
+        'FontName', 'Times New Roman', 'FontSize', 11, ...
+        'ColumnWidth', col_widths, ...
+        'RowName', [], ...
+        'CellSelectionCallback', [], ...
+        'ForegroundColor', [0.15, 0.15, 0.15]);
 
-    title_str = ['Wilcoxon Rank Sum Test on HV (cSA-GOA vs. Baselines) - ', scene];
-    annotation('textbox', [0.15, 0.88, 0.7, 0.06], 'String', title_str, ...
-        'FontWeight', 'bold', 'FontSize', 13, 'FontName', 'Times New Roman', ...
-        'EdgeColor', 'none', 'HorizontalAlignment', 'center');
+    % 着色：Sig列为Yes的标绿，No的标红
+    % (uitable 不直接支持单元格着色，用 uitable 的 BackgroundColor 无法逐格设)
+    % 改用 text-based 表格方案以获得更好的视觉效果
 
-    saveas(fig_w, fullfile(output_dir, 'wilcoxon_table.fig'));
-    exportgraphics(fig_w, fullfile(output_dir, 'wilcoxon_table.png'), 'Resolution', 300);
     close(fig_w);
+
+    % --- 改用 axes + text 绘制，支持逐格着色 ---
+    row_h = 28;
+    header_h = 36;
+    section_h = 28;
+    fig_h = 80 + header_h + section_h + n_rows * row_h + 60;
+    fig_w_px = 1100;
+    fig_w2 = figure('Position', [100, 100, fig_w_px, fig_h], 'Color', 'w', 'MenuBar', 'none', 'ToolBar', 'none');
+
+    ax = axes('Position', [0, 0, 1, 1], 'XLim', [0, fig_w_px], 'YLim', [0, fig_h], ...
+        'XTick', [], 'YTick', [], 'Color', 'w');
+    hold(ax, 'on');
+
+    % 列 x 坐标: Comparison | HV p | HV s | IGD p | IGD s | Spread p | Spread s
+    col_x = [20, 420, 560, 640, 780, 860, 1000];
+    col_align = {'left', 'center', 'center', 'center', 'center', 'center', 'center'};
+
+    y_top = fig_h - 30;
+
+    % 标题
+    title_str = sprintf('Wilcoxon Rank Sum Test: cSA-GOA vs. Baselines  (%s)', scene);
+    text(ax, fig_w_px/2, y_top, title_str, ...
+        'FontSize', 14, 'FontWeight', 'bold', 'FontName', 'Times New Roman', ...
+        'HorizontalAlignment', 'center', 'Color', [0.1, 0.1, 0.1]);
+
+    % 分组标题行 (HV / IGD / Spread)
+    y_group = y_top - 30;
+    group_centers = [15, (col_x(2)+col_x(3))/2, (col_x(4)+col_x(5))/2, (col_x(6)+col_x(7))/2];
+    group_labels = {'Comparison', 'HV', 'IGD', 'Spread'};
+    group_colors = {[0.3,0.3,0.3], [0.0, 0.35, 0.65], [0.65, 0.15, 0.15], [0.1, 0.5, 0.2]};
+
+    % 画分组色条背景
+    group_rects = {[col_x(1)-5, 400], [col_x(2)-10, col_x(3)+20], ...
+                   [col_x(4)-10, col_x(5)+20], [col_x(6)-10, col_x(7)+60]};
+    for g = 1:4
+        if g > 1
+            rectangle('Position', [group_rects{g}(1), y_group-12, group_rects{g}(2)-group_rects{g}(1), 24], ...
+                'FaceColor', group_colors{g}*0.12 + 0.88*[1,1,1], 'EdgeColor', 'none', 'Curvature', 0.2);
+        end
+        text(ax, (group_rects{g}(1)+group_rects{g}(2))/2, y_group, group_labels{g}, ...
+            'FontSize', 12, 'FontWeight', 'bold', 'FontName', 'Times New Roman', ...
+            'HorizontalAlignment', 'center', 'Color', group_colors{g});
+    end
+
+    % 子列标题
+    y_header = y_group - section_h;
+    sub_headers = {'Comparison', 'p-value', 'Sig.', 'p-value', 'Sig.', 'p-value', 'Sig.'};
+    for c = 1:n_cols
+        text(ax, col_x(c), y_header, sub_headers{c}, ...
+            'FontSize', 10, 'FontName', 'Times New Roman', ...
+            'HorizontalAlignment', col_align{c}, 'Color', [0.4, 0.4, 0.4]);
+    end
+
+    % 分隔线
+    line(ax, [10, fig_w_px-10], [y_header-10, y_header-10], 'Color', [0.3, 0.3, 0.3], 'LineWidth', 1.5);
+
+    % 数据行
+    for r = 1:n_rows
+        y_row = y_header - 18 - (r-1) * row_h;
+
+        % 交替行背景
+        if mod(r, 2) == 0
+            rectangle('Position', [5, y_row-10, fig_w_px-10, row_h], ...
+                'FaceColor', [0.96, 0.96, 0.98], 'EdgeColor', 'none');
+        end
+
+        % 对比名称
+        text(ax, col_x(1), y_row, table_data{r, 1}, ...
+            'FontSize', 10.5, 'FontName', 'Times New Roman', ...
+            'HorizontalAlignment', 'left', 'Color', [0.15, 0.15, 0.15]);
+
+        col_idx = 2;
+        for m = 1:n_metrics
+            % p-value
+            text(ax, col_x(col_idx), y_row, table_data{r, col_idx}, ...
+                'FontSize', 10, 'FontName', 'Times New Roman', ...
+                'HorizontalAlignment', 'center', 'Color', [0.2, 0.2, 0.2]);
+
+            % Sig.
+            sig_text = table_data{r, col_idx+1};
+            if strcmp(sig_text, 'Yes')
+                sig_color = [0.0, 0.55, 0.0];  % 绿色
+                sig_display = 'Yes';
+            elseif strcmp(sig_text, 'No')
+                sig_color = [0.7, 0.15, 0.1];  % 红色
+                sig_display = 'No';
+            else
+                sig_color = [0.5, 0.5, 0.5];
+                sig_display = sig_text;
+            end
+            text(ax, col_x(col_idx+1), y_row, sig_display, ...
+                'FontSize', 10, 'FontWeight', 'bold', 'FontName', 'Times New Roman', ...
+                'HorizontalAlignment', 'center', 'Color', sig_color);
+
+            col_idx = col_idx + 2;
+        end
+
+        % 行分隔线
+        line(ax, [10, fig_w_px-10], [y_row-12, y_row-12], 'Color', [0.88, 0.88, 0.88], 'LineWidth', 0.5);
+    end
+
+    % 底部注释
+    y_note = y_header - 25 - n_rows * row_h;
+    text(ax, 15, y_note, 'Sig.: significant at \alpha = 0.05  |  Yes = cSA-GOA significantly different (and better for + metrics)', ...
+        'FontSize', 9, 'FontName', 'Times New Roman', 'Color', [0.5, 0.5, 0.5], ...
+        'HorizontalAlignment', 'left');
+
+    hold(ax, 'off');
+    axis(ax, 'off');
+
+    saveas(fig_w2, fullfile(output_dir, 'wilcoxon_table.fig'));
+    exportgraphics(fig_w2, fullfile(output_dir, 'wilcoxon_table.png'), 'Resolution', 300);
+    close(fig_w2);
     fprintf('  Wilcoxon 统计表格已保存至: %s\n', output_dir);
 end
 

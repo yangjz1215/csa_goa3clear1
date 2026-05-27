@@ -2,6 +2,7 @@ function [global_fit, total_energy] = calcGlobalFitness(mem_matrix, G_weights, U
     weights = G_weights;
     n_subpops = length(G_weights);
     fits = zeros(1, n_subpops);
+    best_local_indices = zeros(1, n_subpops);
 
     for g = 1:n_subpops
         if nargin >= 12 && ~isempty(capturability_g) && length(capturability_g) >= g
@@ -20,14 +21,14 @@ function [global_fit, total_energy] = calcGlobalFitness(mem_matrix, G_weights, U
             [subpop_fits(i), ~, ~, ~] = calcFitness(candidate, User, priorities, ...
                 E_remaining, E_max, k_move, g, subpop_params, N_UAV, cover_radius, RRH, cap, N_RRH, RRH_type, UAV_type, params);
         end
-        fits(g) = max(subpop_fits);
+        [fits(g), best_local_indices(g)] = max(subpop_fits);
     end
 
     global_fit = sum(fits .* weights);
     global_fit = max(0, global_fit);
 
     [~, best_g] = max(fits);
-    [~, best_local_idx] = max(subpop_fits);
+    best_local_idx = best_local_indices(best_g);
 
     best_candidate = mem_matrix{best_g}(best_local_idx,:,:);
     best_candidate = reshape(best_candidate, N_UAV, 2);

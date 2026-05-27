@@ -42,11 +42,11 @@ function new_mem = migrateElite(mem_matrix, target_g, Ub, Lb, User, priorities, 
         end
         
     else  % target_g == 3
-        % G3注入G2的低能耗位置
-        % X_migrate^{3,t+1} = X_elite,energy^{2,t} + 0.1·randn(1,2)·(Ub - Lb)
+        % G3注入G2的精英解（按适应度排序，因E_remaining每代重置无法做能耗排序）
         src_g = 2;
         elite_count = max(1, round(0.1 * K));
-        [~, elite_indices] = getEliteSolutionsByEnergy(mem_matrix{src_g}, E_remaining, E_max, N_UAV);
+        [~, elite_indices] = getEliteSolutions(mem_matrix{src_g}, User, priorities, ...
+            E_remaining, E_max, k_move, src_g, params, N_UAV, cover_radius, RRH, capturability_g(src_g), N_RRH, RRH_type, UAV_type, params_full);
         elites = mem_matrix{src_g}(elite_indices(1:elite_count), :, :);
     end
     
@@ -74,11 +74,4 @@ function [fits, sorted_indices] = getEliteSolutions(mem_matrix, User, priorities
             E_remaining, E_max, k_move, g, params, N_UAV, cover_radius, RRH, cap, N_RRH, RRH_type, UAV_type, params_full);
     end
     [~, sorted_indices] = sort(fits, 'descend');
-end
-
-% 辅助函数：按能耗获取精英解索引
-function [energies, sorted_indices] = getEliteSolutionsByEnergy(mem_matrix, E_remaining, E_max, N_UAV)
-    % 简化：基于剩余能量评估
-    energies = E_remaining;  % 使用当前剩余能量
-    [~, sorted_indices] = sort(energies, 'descend');  % 剩余能量高的优先
 end

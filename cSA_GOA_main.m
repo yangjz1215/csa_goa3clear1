@@ -496,7 +496,13 @@ end
 
 function new_pos = goaTurn(pos, global_best_uav, cap, t)
     delta = cap * norm(pos - global_best_uav);
-    direction = sign(global_best_uav - pos);
+    delta_vec = global_best_uav(:)' - pos(:)';
+    dist = norm(delta_vec);
+    if dist > 1e-10
+        direction = delta_vec / dist;
+    else
+        direction = zeros(1, 2);
+    end
     theta = randn * 0.2;
     rot_matrix = [cos(theta), -sin(theta); sin(theta), cos(theta)];
     direction = direction * rot_matrix;
