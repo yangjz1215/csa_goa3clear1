@@ -7,8 +7,8 @@ function capturability = calcCapturability(subpop, iter, FES_max, g)
         % G3（能耗优化）捕获能力更强，更早收敛
         capturability = 0.3 + 0.6 * (iter / FES_max);  % 0.3~0.9
     else
-        % G1和G2捕获能力
-        capturability = 0.1 + 0.8 * (iter / FES_max);  % 0.1~0.9
+        % G1和G2捕获能力（起始值提高，增强早期领导者引导）
+        capturability = 0.4 + 0.5 * (iter / FES_max);  % 0.4~0.9
     end
     
     % 确保在[0,1]范围内

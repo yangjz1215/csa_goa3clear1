@@ -171,14 +171,22 @@ for iter = 2:params.FES_max
             arch_lats = [pareto_archive.Latency];
             arch_nrgs = [pareto_archive.Energy];
 
-            [~, max_u_idx] = max(arch_utils);
-            leader_G1 = reshape(pareto_archive(max_u_idx).UAV_pos, N_UAV, 2);
+            % 动态 Top-% Leader 选择：前期从 Top 20% 随机选，后期收缩到 Top 1%
+            top_pct = max(0.01, 0.20 - 0.19 * (iter / params.FES_max));
+            n_archive = length(pareto_archive);
+            top_n = max(3, round(n_archive * top_pct));
 
-            [~, min_l_idx] = min(arch_lats);
-            leader_G2 = reshape(pareto_archive(min_l_idx).UAV_pos, N_UAV, 2);
+            % G1: Utility (越大越好)
+            [~, sort_u_idx] = sort(arch_utils, 'descend');
+            leader_G1 = reshape(pareto_archive(sort_u_idx(randi(top_n))).UAV_pos, N_UAV, 2);
 
-            [~, min_e_idx] = min(arch_nrgs);
-            leader_G3 = reshape(pareto_archive(min_e_idx).UAV_pos, N_UAV, 2);
+            % G2: Latency (越小越好)
+            [~, sort_l_idx] = sort(arch_lats, 'ascend');
+            leader_G2 = reshape(pareto_archive(sort_l_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+
+            % G3: Energy (越小越好)
+            [~, sort_e_idx] = sort(arch_nrgs, 'ascend');
+            leader_G3 = reshape(pareto_archive(sort_e_idx(randi(top_n))).UAV_pos, N_UAV, 2);
         else
             leader_G1 = bestUAV;
             leader_G2 = bestUAV;
@@ -315,40 +323,36 @@ for iter = 2:params.FES_max
             iter, params.FES_max, scalar_best_fit, scalar_util, scalar_lat, scalar_nrg, length(pareto_archive));
     end
 
-    if mod(iter, 3) == 0 || iter == params.FES_max
-        pareto_updated_this_iter = false;
+    pareto_updated_this_iter = false;
 
-        do_pv_mix = params.enable_pv_interpolation && params.enable_multi_subpop && ...
-            iter >= 20 && mod(iter, params.pv_interpolation_interval) == 0 && ...
-            length(pareto_archive) >= params.pv_interpolation_min_archive && ...
-            rand < pv_accept;
-        if do_pv_mix
-            mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, params.D_UU, params.D_RU, User, priorities, params);
-            for mc = 1:length(mixed_candidates)
-                cand_pos = mixed_candidates(mc).UAV_pos;
-                [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(cand_pos, User, priorities, params);
-                [pareto_archive, is_updated] = updateParetoArchive3D(pareto_archive, cand_pos, cand_util, cand_lat, cand_nrg);
-                if is_updated
-                    pareto_updated_this_iter = true;
-                end
+    do_pv_mix = params.enable_pv_interpolation && params.enable_multi_subpop && ...
+        iter >= 20 && mod(iter, params.pv_interpolation_interval) == 0 && ...
+        length(pareto_archive) >= params.pv_interpolation_min_archive && ...
+        rand < pv_accept;
+    if do_pv_mix
+        mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, params.D_UU, params.D_RU, User, priorities, params);
+        for mc = 1:length(mixed_candidates)
+            cand_pos = mixed_candidates(mc).UAV_pos;
+            [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(cand_pos, User, priorities, params);
+            [pareto_archive, is_updated] = updateParetoArchive3D(pareto_archive, cand_pos, cand_util, cand_lat, cand_nrg);
+            if is_updated
+                pareto_updated_this_iter = true;
             end
         end
+    end
 
-        for g = 1:3
-            for i = 1:size(mem_matrix{g}, 1)
-                candidate = squeeze(mem_matrix{g}(i, :, :));
-                if size(candidate, 1) == 1 && size(candidate, 2) == N_UAV * 2
-                    candidate = reshape(candidate, N_UAV, 2);
-                end
-                [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(candidate, User, priorities, params);
-                [pareto_archive, is_updated] = updateParetoArchive3D(pareto_archive, candidate, cand_util, cand_lat, cand_nrg);
-                if is_updated
-                    pareto_updated_this_iter = true;
-                end
+    for g = 1:3
+        for i = 1:size(mem_matrix{g}, 1)
+            candidate = squeeze(mem_matrix{g}(i, :, :));
+            if size(candidate, 1) == 1 && size(candidate, 2) == N_UAV * 2
+                candidate = reshape(candidate, N_UAV, 2);
+            end
+            [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(candidate, User, priorities, params);
+            [pareto_archive, is_updated] = updateParetoArchive3D(pareto_archive, candidate, cand_util, cand_lat, cand_nrg);
+            if is_updated
+                pareto_updated_this_iter = true;
             end
         end
-    else
-        pareto_updated_this_iter = false;
     end
 
     if params.enable_smart_stop && params.enable_early_stop && iter > 100
