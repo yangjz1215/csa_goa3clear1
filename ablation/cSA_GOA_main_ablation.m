@@ -207,40 +207,45 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                         pos = X_init;
                     end
 
-                    pos = max(Lb, min(Ub, pos));
+                    pos = projectToFeasiblePosition(pos, X_init, cand_i, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb);
                     candidates(i, uav_idx, :) = pos(:)';
                 end
+            end
+
+            % 动态 Top-% Leader 选择：前期从 Top 20% 随机选，后期收缩到 Top 1%
+            if params.enable_pareto_leader && length(pareto_archive) >= 3
+                arch_utils = [pareto_archive.Utility];
+                arch_lats = [pareto_archive.Latency];
+                arch_nrgs = [pareto_archive.Energy];
+
+                top_pct = max(0.01, 0.20 - 0.19 * (iter / params.FES_max));
+                n_archive = length(pareto_archive);
+                top_n = max(3, round(n_archive * top_pct));
+
+                [~, sort_u_idx] = sort(arch_utils, 'descend');
+                leader_G1 = reshape(pareto_archive(sort_u_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+                [~, sort_l_idx] = sort(arch_lats, 'ascend');
+                leader_G2 = reshape(pareto_archive(sort_l_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+                [~, sort_e_idx] = sort(arch_nrgs, 'ascend');
+                leader_G3 = reshape(pareto_archive(sort_e_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+
+                if g == 1
+                    global_leader = leader_G1;
+                elseif g == 2
+                    global_leader = leader_G2;
+                else
+                    global_leader = leader_G3;
+                end
+            elseif params.enable_random_global_leader && ~isempty(random_leader)
+                global_leader = random_leader;
+            else
+                global_leader = bestUAV;
             end
 
             for i = 1:params.K
                 cand_i = squeeze(candidates(i, :, :));
                 if size(cand_i, 1) == 2 && size(cand_i, 2) == N_UAV
                     cand_i = cand_i';
-                end
-
-                if params.enable_pareto_leader && length(pareto_archive) >= 3
-                    arch_utils = [pareto_archive.Utility];
-                    arch_lats = [pareto_archive.Latency];
-                    arch_nrgs = [pareto_archive.Energy];
-
-                    [~, max_u_idx] = max(arch_utils);
-                    leader_G1 = reshape(pareto_archive(max_u_idx).UAV_pos, N_UAV, 2);
-                    [~, min_l_idx] = min(arch_lats);
-                    leader_G2 = reshape(pareto_archive(min_l_idx).UAV_pos, N_UAV, 2);
-                    [~, min_e_idx] = min(arch_nrgs);
-                    leader_G3 = reshape(pareto_archive(min_e_idx).UAV_pos, N_UAV, 2);
-
-                    if g == 1
-                        global_leader = leader_G1;
-                    elseif g == 2
-                        global_leader = leader_G2;
-                    else
-                        global_leader = leader_G3;
-                    end
-                elseif params.enable_random_global_leader && ~isempty(random_leader)
-                    global_leader = random_leader;
-                else
-                    global_leader = bestUAV;
                 end
 
                 if params.enable_goa_turn
@@ -251,12 +256,20 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                     end
                     for uav_idx = 1:N_UAV
                         pos = goaTurn(cand_i(uav_idx, :), global_leader(uav_idx, :), cap_eff, t);
-                        pos = max(Lb, min(Ub, pos));
+                        pos = projectToFeasiblePosition(pos, cand_i(uav_idx, :), cand_i, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb);
                         cand_i(uav_idx, :) = pos(:)';
                     end
                 end
 
-                candidates(i, :, :) = reshape(cand_i, 1, N_UAV, 2);
+                candidate_pos = cand_i;
+                if ~isFeasibleCandidate(candidate_pos, RRH, N_RRH, N_UAV, params)
+                    cand_init_i = squeeze(candidates_init(i, :, :));
+                    if size(cand_init_i, 1) == 2 && size(cand_init_i, 2) == N_UAV
+                        cand_init_i = cand_init_i';
+                    end
+                    candidate_pos = cand_init_i;
+                end
+                candidates(i, :, :) = reshape(candidate_pos, 1, N_UAV, 2);
             end
 
             if ~params.enable_multi_subpop
@@ -297,29 +310,27 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 iter, params.FES_max, scalar_best_fit, scalar_util, scalar_lat, scalar_nrg, length(pareto_archive));
         end
 
-        if mod(iter, 3) == 0 || iter == params.FES_max
-            do_pv_mix = params.enable_pv_interpolation && params.enable_multi_subpop && ...
-                iter >= 20 && mod(iter, params.pv_interpolation_interval) == 0 && ...
-                length(pareto_archive) >= params.pv_interpolation_min_archive && ...
-                rand < pv_accept;
-            if do_pv_mix
-                mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, params.D_UU, params.D_RU, User, priorities, params);
-                for mc = 1:length(mixed_candidates)
-                    cand_pos = mixed_candidates(mc).UAV_pos;
-                    [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(cand_pos, User, priorities, params);
-                    [pareto_archive, ~] = updateParetoArchive3D(pareto_archive, cand_pos, cand_util, cand_lat, cand_nrg);
-                end
+        do_pv_mix = params.enable_pv_interpolation && params.enable_multi_subpop && ...
+            iter >= 20 && mod(iter, params.pv_interpolation_interval) == 0 && ...
+            length(pareto_archive) >= params.pv_interpolation_min_archive && ...
+            rand < pv_accept;
+        if do_pv_mix
+            mixed_candidates = pvInterpolationExchange(subpops, N_UAV, Ub, Lb, RRH, params.D_UU, params.D_RU, User, priorities, params);
+            for mc = 1:length(mixed_candidates)
+                cand_pos = mixed_candidates(mc).UAV_pos;
+                [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(cand_pos, User, priorities, params);
+                [pareto_archive, ~] = updateParetoArchive3D(pareto_archive, cand_pos, cand_util, cand_lat, cand_nrg);
             end
+        end
 
-            for g = 1:n_subpops
-                for i = 1:size(mem_matrix{g}, 1)
-                    candidate = squeeze(mem_matrix{g}(i, :, :));
-                    if size(candidate, 1) == 1 && size(candidate, 2) == N_UAV * 2
-                        candidate = reshape(candidate, N_UAV, 2);
-                    end
-                    [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(candidate, User, priorities, params);
-                    [pareto_archive, ~] = updateParetoArchive3D(pareto_archive, candidate, cand_util, cand_lat, cand_nrg);
+        for g = 1:n_subpops
+            for i = 1:size(mem_matrix{g}, 1)
+                candidate = squeeze(mem_matrix{g}(i, :, :));
+                if size(candidate, 1) == 1 && size(candidate, 2) == N_UAV * 2
+                    candidate = reshape(candidate, N_UAV, 2);
                 end
+                [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(candidate, User, priorities, params);
+                [pareto_archive, ~] = updateParetoArchive3D(pareto_archive, candidate, cand_util, cand_lat, cand_nrg);
             end
         end
 
@@ -482,9 +493,64 @@ end
 
 function new_pos = goaTurn(pos, global_best_uav, cap, t)
     delta = cap * norm(pos - global_best_uav);
-    direction = sign(global_best_uav - pos);
+    delta_vec = global_best_uav(:)' - pos(:)';
+    dist = norm(delta_vec);
+    if dist > 1e-10
+        direction = delta_vec / dist;
+    else
+        direction = zeros(1, 2);
+    end
     theta = randn * 0.2;
     rot_matrix = [cos(theta), -sin(theta); sin(theta), cos(theta)];
     direction = direction * rot_matrix;
     new_pos = pos(:)' + t * delta .* direction;
+end
+
+function pos = projectToFeasiblePosition(pos, fallback_pos, candidate_positions, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb)
+    pos = max(Lb, min(Ub, pos));
+    valid_pos = true;
+
+    for rrh_idx = 1:N_RRH
+        if norm(pos - RRH(rrh_idx, :)) < params.D_RU
+            valid_pos = false;
+            break;
+        end
+    end
+
+    if valid_pos
+        for other_uav = 1:N_UAV
+            if other_uav ~= uav_idx
+                other_pos = candidate_positions(other_uav, :);
+                if norm(pos - other_pos) < params.D_UU
+                    valid_pos = false;
+                    break;
+                end
+            end
+        end
+    end
+
+    if ~valid_pos
+        pos = fallback_pos;
+    end
+end
+
+function tf = isFeasibleCandidate(candidate_pos, RRH, N_RRH, N_UAV, params)
+    tf = true;
+
+    for rrh_idx = 1:N_RRH
+        dists_rrh = sqrt(sum((candidate_pos - RRH(rrh_idx, :)).^2, 2));
+        if any(dists_rrh < params.D_RU)
+            tf = false;
+            return;
+        end
+    end
+
+    for uav_a = 1:N_UAV
+        for uav_b = uav_a + 1:N_UAV
+            if norm(candidate_pos(uav_a, :) - candidate_pos(uav_b, :)) < params.D_UU
+                tf = false;
+                return;
+            end
+        end
+    end
 end
