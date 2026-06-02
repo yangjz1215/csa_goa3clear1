@@ -98,6 +98,12 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
     fprintf('初始化完成：综合适应度=%.4f | 真实效用(优先级和)=%.1f | 时延=%.2fs | 能耗=%.1f J\n', ...
         scalar_best_fit, real_u, real_l, real_e);
 
+    % 适应度缓存：避免 updateMemory 和 calcGlobalFitness 重复评估
+    mem_fits_cache = cell(n_subpops, 1);
+    mem_utils_cache = cell(n_subpops, 1);
+    mem_lats_cache = cell(n_subpops, 1);
+    mem_nrgs_cache = cell(n_subpops, 1);
+
     for iter = 2:params.FES_max
         t = 1 - iter / params.FES_max;
 
@@ -208,9 +214,11 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 g_eval = g;
             end
 
-            mem_matrix{g} = updateMemory(mem_matrix{g}, candidates, User, priorities, ...
+            [mem_matrix{g}, mem_fits_cache{g}, mem_utils_cache{g}, mem_lats_cache{g}, mem_nrgs_cache{g}] = ...
+                updateMemory(mem_matrix{g}, candidates, User, priorities, ...
                 E_remaining, params.E_max, params.k_move, g_eval, params.subpop_params, ...
-                N_UAV, params.cover_radius, RRH, capturability_g(g), N_RRH, RRH_type, UAV_type, params);
+                N_UAV, params.cover_radius, RRH, capturability_g(g), N_RRH, RRH_type, UAV_type, params, ...
+                mem_fits_cache{g}, mem_utils_cache{g}, mem_lats_cache{g}, mem_nrgs_cache{g});
         end
 
         local_mus = zeros(n_subpops, N_UAV, 2);
@@ -223,7 +231,7 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
 
         [curr_fit_best, curr_energy] = calcGlobalFitness(mem_matrix, params.G_weights, ...
             User, priorities, E_remaining, params.E_max, params.k_move, params.subpop_params, ...
-            N_UAV, params.cover_radius, RRH, capturability_g, N_RRH, RRH_type, UAV_type, params);
+            N_UAV, params.cover_radius, RRH, capturability_g, N_RRH, RRH_type, UAV_type, params, mem_fits_cache);
 
         if curr_fit_best > scalar_best_fit
             scalar_best_fit = curr_fit_best;
@@ -240,13 +248,16 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 iter, params.FES_max, scalar_best_fit, scalar_util, scalar_lat, scalar_nrg, length(pareto_archive));
         end
 
+        % Pareto存档更新：使用updateMemory缓存的目标值，避免重复调用calcMEC_Objectives
         for g = 1:n_subpops
             for i = 1:size(mem_matrix{g}, 1)
                 candidate = squeeze(mem_matrix{g}(i, :, :));
                 if size(candidate, 1) == 1 && size(candidate, 2) == N_UAV * 2
                     candidate = reshape(candidate, N_UAV, 2);
                 end
-                [cand_util, cand_lat, cand_nrg] = calcMEC_Objectives(candidate, User, priorities, params);
+                cand_util = mem_utils_cache{g}(i);
+                cand_lat = mem_lats_cache{g}(i);
+                cand_nrg = mem_nrgs_cache{g}(i);
                 [pareto_archive, ~] = updateParetoArchive3D(pareto_archive, candidate, cand_util, cand_lat, cand_nrg);
             end
         end
