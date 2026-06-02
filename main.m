@@ -66,6 +66,7 @@ params.D_RU = 10;
 params.cover_radius = 150;
 params.RRH_radius = 150;
 params.E_max = 50000;
+params.energy_norm_max = 15000;
 params.k_move = 15;
 params.bandwidth = 1e6;
 
@@ -120,7 +121,6 @@ end
 
 params.enable_early_stop = true;
 params.enable_smart_stop = true;
-params.enable_migration_log = true;
 
 switch optimization_method
     case 'fixed'
@@ -138,13 +138,6 @@ if ~isempty(opt_params)
     params.K = opt_params.best_K;
     params.subpop_params.q = [opt_params.best_q, opt_params.best_q, opt_params.best_q];
     fprintf('🎯 [动态注入] 已加载最优超参数 K=%d, q=%.1f\n', params.K, opt_params.best_q);
-    if isfield(opt_params, 'best_phase_w_progress')
-        params.phase_w_progress = opt_params.best_phase_w_progress;
-        params.phase_w_cov = opt_params.best_phase_w_cov;
-        params.phase_w_inner = opt_params.best_phase_w_inner;
-        fprintf('🎯 [动态注入] phi_t 权重: progress=%.3f, cov=%.3f, inner=%.3f\n', ...
-            opt_params.best_phase_w_progress, opt_params.best_phase_w_cov, opt_params.best_phase_w_inner);
-    end
     if isfield(opt_params, 'best_beta')
         params.subpop_params.beta = [opt_params.best_beta, opt_params.best_beta, opt_params.best_beta];
         fprintf('🎯 [动态注入] beta=%.2f\n', opt_params.best_beta);
