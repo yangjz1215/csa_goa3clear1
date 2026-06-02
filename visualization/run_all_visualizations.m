@@ -17,9 +17,16 @@ for s = 1:length(scenes)
         fprintf('  Latest comparison file: %s\n', comp_files(idx(1)).name);
         try
             plot_comparison_all(latest_comp);
-            fprintf('   -> Comparison charts done\n\n');
+            fprintf('   -> Comparison charts done\n');
         catch ME
-            fprintf('   -> Error: %s\n\n', ME.message);
+            fprintf('   -> Error: %s\n', ME.message);
+        end
+
+        try
+            plot_knee_comparison(latest_comp);
+            fprintf('   -> Knee point comparison done\n\n');
+        catch ME
+            fprintf('   -> Knee point error: %s\n\n', ME.message);
         end
     else
         fprintf('  No comparison results found for %s scene\n\n', scene);
