@@ -17,7 +17,6 @@ function results = run_ablation_para(varargin)
     n_workers = p.Results.n_workers;
 
     [User, priorities, N_User, N_UAV, RRH, RRH_type, N_RRH, UAV_type, Ub, Lb, params, map_data] = loadExperimentContext(project_dir, map_name);
-    params.enable_migration_log = false;
 
     fprintf('--- 加载固定地图: %s ---\n', map_name);
     fprintf('  用户数: %d, UAV数: %d\n', N_User, N_UAV);
@@ -25,10 +24,10 @@ function results = run_ablation_para(varargin)
 
     variants = {
         'proposed',              'Proposed cSA-GOA (full)';
-        'no_phi_t',              'w/o φ_t Unified Scheduling';
-        'no_pv_interpolation',   'w/o PV Interpolation Exchange';
-        'no_migration',          'w/o Elite Migration';
         'no_subpop',             'w/o Multi-Subpopulation';
+        'no_goa_turn',           'w/o GOA Turn Operator';
+        'no_goa_repulsion',      'w/o GOA Repulsion (U/V-Shape)';
+        'no_pareto_leader',      'w/o Dynamic Pareto Leader';
     };
     fprintf('消融实验: 变体共 %d 个\n', size(variants, 1));
 
@@ -233,6 +232,7 @@ function [User, priorities, N_User, N_UAV, RRH, RRH_type, N_RRH, UAV_type, Ub, L
     params.cover_radius = 150;
     params.RRH_radius = 150;
     params.E_max = 50000;
+    params.energy_norm_max = 15000;
     params.D_UU = 10;
     params.D_RU = 10;
     params.FES_max = 300;
@@ -258,13 +258,6 @@ function [User, priorities, N_User, N_UAV, RRH, RRH_type, N_RRH, UAV_type, Ub, L
         params.K = opt_params.best_K;
         params.subpop_params.q = [opt_params.best_q, opt_params.best_q, opt_params.best_q];
         fprintf('[动态注入] 已加载最优超参数 K=%d, q=%.1f\n', params.K, opt_params.best_q);
-        if isfield(opt_params, 'best_phase_w_progress')
-            params.phase_w_progress = opt_params.best_phase_w_progress;
-            params.phase_w_cov = opt_params.best_phase_w_cov;
-            params.phase_w_inner = opt_params.best_phase_w_inner;
-            fprintf('[动态注入] phi_t 权重: progress=%.3f, cov=%.3f, inner=%.3f\n', ...
-                opt_params.best_phase_w_progress, opt_params.best_phase_w_cov, opt_params.best_phase_w_inner);
-        end
         if isfield(opt_params, 'best_beta')
             params.subpop_params.beta = [opt_params.best_beta, opt_params.best_beta, opt_params.best_beta];
             fprintf('[动态注入] beta=%.2f\n', opt_params.best_beta);

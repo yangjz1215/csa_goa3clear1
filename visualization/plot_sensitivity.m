@@ -58,18 +58,15 @@ saveas(fig, png_path);
 saveas(fig, fig_path);
 fprintf('Phase 2 柱状图已成功保存至: %s\n', out_dir);
 
-%% Tier 2 超参数敏感度可视化（phi_t 权重 + beta）
+%% Tier 2 beta 敏感度可视化
 if exist('tier2_config_names', 'var') && exist('tier2_mean_hv', 'var')
-    fig2 = figure('Name', 'Tier 2 超参数敏感度分析 (HV)', 'Position', [100, 100, 1000, 500]);
+    fig2 = figure('Name', 'beta 敏感度分析 (HV)', 'Position', [100, 100, 600, 500]);
 
     n_t2 = length(tier2_mean_hv);
     bar_colors2 = repmat([0.2 0.7 0.5], n_t2, 1);
-    % 基准配置标红（第2,5,8,11为各参数的基准值）
-    baseline_idx = [2, 5, 8, 11];
-    for bi = baseline_idx
-        if bi <= n_t2
-            bar_colors2(bi, :) = [0.8 0.2 0.2];
-        end
+    % 基准配置标红（第2个为基准值）
+    if n_t2 >= 2
+        bar_colors2(2, :) = [0.8 0.2 0.2];
     end
 
     b2 = bar(tier2_mean_hv, 'FaceColor', 'flat');
@@ -80,7 +77,7 @@ if exist('tier2_config_names', 'var') && exist('tier2_mean_hv', 'var')
     set(gca, 'XTick', 1:n_t2, 'XTickLabel', tier2_config_names, 'XTickLabelRotation', 35);
     set(gca, 'FontSize', 10, 'FontName', 'Times New Roman');
     ylabel('Hypervolume (HV) Score', 'FontWeight', 'bold');
-    title('Sensitivity of Performance to Core Hyperparameters (\phi_t Weights + \beta)', 'FontWeight', 'bold');
+    title('Sensitivity of Performance to \beta', 'FontWeight', 'bold');
     grid on;
 
     ylim_min2 = min(tier2_mean_hv) * 0.95;

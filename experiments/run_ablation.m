@@ -107,10 +107,10 @@ function results = run_ablation(varargin)
 
     variants = {
         'proposed', 'Proposed (full)';
-        'no_phi_t', 'w/o φ_t Unified Scheduling';
-        'no_pv_interpolation', 'w/o PV Interpolation Exchange';
-        'no_migration', 'w/o Elite Migration';
         'no_subpop', 'w/o Multi-Subpopulation';
+        'no_goa_turn', 'w/o GOA Turn Operator';
+        'no_goa_repulsion', 'w/o GOA Repulsion (U/V-Shape)';
+        'no_pareto_leader', 'w/o Dynamic Pareto Leader';
     };
 
     reference_point = [1.0, 100000];
