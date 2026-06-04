@@ -249,16 +249,19 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
         end
 
         % Pareto存档更新：使用updateMemory缓存的目标值，避免重复调用calcMEC_Objectives
-        for g = 1:n_subpops
-            for i = 1:size(mem_matrix{g}, 1)
-                candidate = squeeze(mem_matrix{g}(i, :, :));
-                if size(candidate, 1) == 1 && size(candidate, 2) == N_UAV * 2
-                    candidate = reshape(candidate, N_UAV, 2);
+        % 性能优化：每5代更新一次Pareto存档（原来每代更新导致运行时间暴增4-5倍）
+        if mod(iter, 5) == 0 || iter == params.FES_max
+            for g = 1:n_subpops
+                for i = 1:size(mem_matrix{g}, 1)
+                    candidate = squeeze(mem_matrix{g}(i, :, :));
+                    if size(candidate, 1) == 1 && size(candidate, 2) == N_UAV * 2
+                        candidate = reshape(candidate, N_UAV, 2);
+                    end
+                    cand_util = mem_utils_cache{g}(i);
+                    cand_lat = mem_lats_cache{g}(i);
+                    cand_nrg = mem_nrgs_cache{g}(i);
+                    [pareto_archive, ~] = updateParetoArchive3D(pareto_archive, candidate, cand_util, cand_lat, cand_nrg);
                 end
-                cand_util = mem_utils_cache{g}(i);
-                cand_lat = mem_lats_cache{g}(i);
-                cand_nrg = mem_nrgs_cache{g}(i);
-                [pareto_archive, ~] = updateParetoArchive3D(pareto_archive, candidate, cand_util, cand_lat, cand_nrg);
             end
         end
     end

@@ -25,7 +25,9 @@ function [archive, is_updated] = updateParetoArchive3D(archive, new_pos, util, l
     end
 
     MAX_ARCHIVE_SIZE = 500;
-    if length(archive) > MAX_ARCHIVE_SIZE
+    % 性能优化：允许档案临时超限到1.2倍再清理，避免每次新插入都触发O(n^2)的全局支配清理
+    % 原代码每次超限都调用 removeDominated(archive)，存档满时是25万次比较，性能瓶颈
+    if length(archive) > MAX_ARCHIVE_SIZE * 1.2
         % 截断前先做一次全局支配清理，确保档案中不含被支配解
         archive = removeDominated(archive);
 

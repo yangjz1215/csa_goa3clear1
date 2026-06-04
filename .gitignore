@@ -11,6 +11,8 @@ experiments/*.log
 # IDE files
 .vscode/
 .idea/
+.trae/
+.claude/
 
 # OS files
 Thumbs.db
