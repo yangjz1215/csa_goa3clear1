@@ -104,6 +104,15 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
     mem_lats_cache = cell(n_subpops, 1);
     mem_nrgs_cache = cell(n_subpops, 1);
 
+    % 自适应权重初始化
+    adaptive_weights = [0.70, 0.15, 0.15;
+                        0.30, 0.50, 0.20;
+                        0.20, 0.15, 0.65];
+    if ~isfield(params, 'enable_adaptive_weight')
+        params.enable_adaptive_weight = true;
+    end
+    params.test_weights = adaptive_weights;
+
     for iter = 2:params.FES_max
         t = 1 - iter / params.FES_max;
 
@@ -164,12 +173,51 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 n_archive = length(pareto_archive);
                 top_n = max(3, round(n_archive * top_pct));
 
+                % 拥挤度感知的Leader选择：从top-N中选择目标空间中最稀疏的解
                 [~, sort_u_idx] = sort(arch_utils, 'descend');
-                leader_G1 = reshape(pareto_archive(sort_u_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+                top_u_idx = sort_u_idx(1:top_n);
+                top_u_objs = zeros(top_n, 3);
+                for j = 1:top_n
+                    top_u_objs(j, :) = [-arch_utils(top_u_idx(j)), arch_lats(top_u_idx(j)), arch_nrgs(top_u_idx(j))];
+                end
+                nn_dist_u = inf(top_n, 1);
+                for j = 1:top_n
+                    d = sqrt(sum((top_u_objs - repmat(top_u_objs(j,:), top_n, 1)).^2, 2));
+                    d(j) = inf;
+                    nn_dist_u(j) = min(d);
+                end
+                [~, sp_u] = max(nn_dist_u);
+                leader_G1 = reshape(pareto_archive(top_u_idx(sp_u)).UAV_pos, N_UAV, 2);
+
                 [~, sort_l_idx] = sort(arch_lats, 'ascend');
-                leader_G2 = reshape(pareto_archive(sort_l_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+                top_l_idx = sort_l_idx(1:top_n);
+                top_l_objs = zeros(top_n, 3);
+                for j = 1:top_n
+                    top_l_objs(j, :) = [-arch_utils(top_l_idx(j)), arch_lats(top_l_idx(j)), arch_nrgs(top_l_idx(j))];
+                end
+                nn_dist_l = inf(top_n, 1);
+                for j = 1:top_n
+                    d = sqrt(sum((top_l_objs - repmat(top_l_objs(j,:), top_n, 1)).^2, 2));
+                    d(j) = inf;
+                    nn_dist_l(j) = min(d);
+                end
+                [~, sp_l] = max(nn_dist_l);
+                leader_G2 = reshape(pareto_archive(top_l_idx(sp_l)).UAV_pos, N_UAV, 2);
+
                 [~, sort_e_idx] = sort(arch_nrgs, 'ascend');
-                leader_G3 = reshape(pareto_archive(sort_e_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+                top_e_idx = sort_e_idx(1:top_n);
+                top_e_objs = zeros(top_n, 3);
+                for j = 1:top_n
+                    top_e_objs(j, :) = [-arch_utils(top_e_idx(j)), arch_lats(top_e_idx(j)), arch_nrgs(top_e_idx(j))];
+                end
+                nn_dist_e = inf(top_n, 1);
+                for j = 1:top_n
+                    d = sqrt(sum((top_e_objs - repmat(top_e_objs(j,:), top_n, 1)).^2, 2));
+                    d(j) = inf;
+                    nn_dist_e(j) = min(d);
+                end
+                [~, sp_e] = max(nn_dist_e);
+                leader_G3 = reshape(pareto_archive(top_e_idx(sp_e)).UAV_pos, N_UAV, 2);
 
                 if g == 1
                     global_leader = leader_G1;
@@ -205,12 +253,6 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                     end
                     candidate_pos = cand_init_i;
                 end
-                candidates(i, :, :) = reshape(candidate_pos, 1, N_UAV, 2);
-            end
-
-            if ~params.enable_multi_subpop
-                g_eval = 1;
-            else
                 g_eval = g;
             end
 
@@ -264,6 +306,53 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 end
             end
         end
+
+        % 自适应权重旋转：每20代根据Pareto存档分布微调子种群权重方向
+        if params.enable_adaptive_weight && mod(iter, 20) == 0 && iter > 20 && iter < 0.8 * params.FES_max && length(pareto_archive) >= 10
+            arch_utils_aw = [pareto_archive.Utility];
+            arch_lats_aw = [pareto_archive.Latency];
+            arch_nrgs_aw = [pareto_archive.Energy];
+            n_arch_aw = length(pareto_archive);
+
+            range_u_aw = max(arch_utils_aw) - min(arch_utils_aw); if range_u_aw < 1e-9, range_u_aw = 1; end
+            range_l_aw = max(arch_lats_aw) - min(arch_lats_aw); if range_l_aw < 1e-9, range_l_aw = 1; end
+            range_e_aw = max(arch_nrgs_aw) - min(arch_nrgs_aw); if range_e_aw < 1e-9, range_e_aw = 1; end
+
+            nu_aw = (arch_utils_aw - min(arch_utils_aw)) / range_u_aw;
+            nl_aw = (arch_lats_aw - min(arch_lats_aw)) / range_l_aw;
+            ne_aw = (arch_nrgs_aw - min(arch_nrgs_aw)) / range_e_aw;
+
+            objs_aw = [nu_aw(:), nl_aw(:), ne_aw(:)];
+            crowd_aw = zeros(n_arch_aw, 1);
+            for ci = 1:n_arch_aw
+                d_aw = sqrt(sum((objs_aw - repmat(objs_aw(ci,:), n_arch_aw, 1)).^2, 2));
+                d_aw(ci) = inf;
+                crowd_aw(ci) = min(d_aw);
+            end
+
+            [~, sp_aw] = max(crowd_aw);
+            target_dir = [nu_aw(sp_aw), 1 - nl_aw(sp_aw), 1 - ne_aw(sp_aw)];
+            target_dir = target_dir / sum(target_dir);
+
+            min_d_aw = inf; closest_g_aw = 1;
+            for gi = 1:3
+                d_aw = norm(adaptive_weights(gi,:) - target_dir);
+                if d_aw < min_d_aw
+                    min_d_aw = d_aw;
+                    closest_g_aw = gi;
+                end
+            end
+
+            progress_aw = iter / params.FES_max;
+            alpha_aw = 0.1 * (1 - progress_aw)^1.5;
+            adaptive_weights(closest_g_aw, :) = (1 - alpha_aw) * adaptive_weights(closest_g_aw, :) + alpha_aw * target_dir;
+
+            w_aw = adaptive_weights(closest_g_aw, :);
+            w_aw = max(0.05, min(0.90, w_aw));
+            adaptive_weights(closest_g_aw, :) = w_aw / sum(w_aw);
+
+            params.test_weights = adaptive_weights;
+        end
     end
 
     [final_util, final_lat, final_nrg] = calcMEC_Objectives(bestUAV, User, priorities, params);
@@ -286,19 +375,20 @@ function params = configureAblationVariant(params, variant)
             % 全部开启
         case {'no_subpop', 'no_multi_subpop'}
             params.enable_multi_subpop = false;
+            params.enable_goa_turn = false;
         case 'no_goa_turn'
             params.enable_goa_turn = false;
         case 'no_goa_repulsion'
             params.enable_goa_repulsion = false;
         case {'no_pareto_leader', 'no_pareto'}
             params.enable_pareto_leader = false;
+        case 'no_adaptive_weight'
+            params.enable_adaptive_weight = false;
         otherwise
             error('Unknown ablation variant: %s', variant);
     end
 end
 
-function solution = buildSolutionStruct(uav_pos, scalar_fitness, User, priorities, params, label)
-    [util, lat, nrg, success_rate] = calcMEC_Objectives(uav_pos, User, priorities, params);
     solution = struct( ...
         'label', label, ...
         'UAV_pos', uav_pos, ...
@@ -336,8 +426,18 @@ function solution = selectKneeSolution(pareto_archive, fallback_uav, fallback_sc
     mins = min(objs, [], 1);
     maxs = max(objs, [], 1);
     norm_objs = (objs - mins) ./ (maxs - mins + 1e-9);
-    ideal = min(norm_objs, [], 1);
-    [~, knee_idx] = min(sqrt(sum((norm_objs - ideal).^2, 2)));
+    % 理想点：使用实际最小值而非理论最大值，避免Energy归一化被压缩
+    ideal = [min(-U), min(L), min(E)];
+    ideal_norm = (ideal - mins) ./ (maxs - mins + 1e-9);
+    % 加权切比雪夫距离：max(w_j * |f_j - z_ideal|)，选择各目标均无短板的折中解
+    w = [1/3, 1/3, 1/3];
+    rho = 0.001;
+    cheb_dist = zeros(size(norm_objs, 1), 1);
+    for i = 1:size(norm_objs, 1)
+        gap = w .* abs(norm_objs(i, :) - ideal_norm);
+        cheb_dist(i) = max(gap) + rho * sum(gap);
+    end
+    [~, knee_idx] = min(cheb_dist);
 
     selected_uav = pareto_archive(knee_idx).UAV_pos;
     solution = buildSolutionStruct(selected_uav, fallback_scalar_fitness, User, priorities, params, 'archive_knee');

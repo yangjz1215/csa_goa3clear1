@@ -28,6 +28,7 @@ function results = run_ablation_para(varargin)
         'no_goa_turn',           'w/o GOA Turn Operator';
         'no_goa_repulsion',      'w/o GOA Repulsion (U/V-Shape)';
         'no_pareto_leader',      'w/o Dynamic Pareto Leader';
+        'no_adaptive_weight',    'w/o Adaptive Weight Rotation';
     };
     fprintf('消融实验: 变体共 %d 个\n', size(variants, 1));
 

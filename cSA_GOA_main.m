@@ -74,6 +74,15 @@ fprintf('初始化完成：综合适应度=%.4f | 真实效用(优先级和)=%.1
 mo_stagnation_counter = 0;
 actual_iter = params.FES_max;
 
+% 自适应权重初始化
+adaptive_weights = [0.70, 0.15, 0.15;
+                    0.30, 0.50, 0.20;
+                    0.20, 0.15, 0.65];
+if ~isfield(params, 'enable_adaptive_weight')
+    params.enable_adaptive_weight = true;
+end
+params.test_weights = adaptive_weights;
+
 % 适应度缓存：避免 updateMemory 和 calcGlobalFitness 重复评估
 mem_fits_cache = cell(3, 1);
 mem_utils_cache = cell(3, 1);
@@ -137,14 +146,52 @@ for iter = 2:params.FES_max
             n_archive = length(pareto_archive);
             top_n = max(3, round(n_archive * top_pct));
 
+            % 拥挤度感知的Leader选择：从top-N中选择目标空间中最稀疏的解
+            % 计算top-N中每个解到最近邻的目标空间距离，距离越大=越稀疏=优先当leader
             [~, sort_u_idx] = sort(arch_utils, 'descend');
-            leader_G1 = reshape(pareto_archive(sort_u_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+            top_u_idx = sort_u_idx(1:top_n);
+            top_u_objs = zeros(top_n, 3);
+            for j = 1:top_n
+                top_u_objs(j, :) = [-arch_utils(top_u_idx(j)), arch_lats(top_u_idx(j)), arch_nrgs(top_u_idx(j))];
+            end
+            nn_dist_u = inf(top_n, 1);
+            for j = 1:top_n
+                d = sqrt(sum((top_u_objs - repmat(top_u_objs(j,:), top_n, 1)).^2, 2));
+                d(j) = inf;
+                nn_dist_u(j) = min(d);
+            end
+            [~, sp_u] = max(nn_dist_u);
+            leader_G1 = reshape(pareto_archive(top_u_idx(sp_u)).UAV_pos, N_UAV, 2);
 
             [~, sort_l_idx] = sort(arch_lats, 'ascend');
-            leader_G2 = reshape(pareto_archive(sort_l_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+            top_l_idx = sort_l_idx(1:top_n);
+            top_l_objs = zeros(top_n, 3);
+            for j = 1:top_n
+                top_l_objs(j, :) = [-arch_utils(top_l_idx(j)), arch_lats(top_l_idx(j)), arch_nrgs(top_l_idx(j))];
+            end
+            nn_dist_l = inf(top_n, 1);
+            for j = 1:top_n
+                d = sqrt(sum((top_l_objs - repmat(top_l_objs(j,:), top_n, 1)).^2, 2));
+                d(j) = inf;
+                nn_dist_l(j) = min(d);
+            end
+            [~, sp_l] = max(nn_dist_l);
+            leader_G2 = reshape(pareto_archive(top_l_idx(sp_l)).UAV_pos, N_UAV, 2);
 
             [~, sort_e_idx] = sort(arch_nrgs, 'ascend');
-            leader_G3 = reshape(pareto_archive(sort_e_idx(randi(top_n))).UAV_pos, N_UAV, 2);
+            top_e_idx = sort_e_idx(1:top_n);
+            top_e_objs = zeros(top_n, 3);
+            for j = 1:top_n
+                top_e_objs(j, :) = [-arch_utils(top_e_idx(j)), arch_lats(top_e_idx(j)), arch_nrgs(top_e_idx(j))];
+            end
+            nn_dist_e = inf(top_n, 1);
+            for j = 1:top_n
+                d = sqrt(sum((top_e_objs - repmat(top_e_objs(j,:), top_n, 1)).^2, 2));
+                d(j) = inf;
+                nn_dist_e(j) = min(d);
+            end
+            [~, sp_e] = max(nn_dist_e);
+            leader_G3 = reshape(pareto_archive(top_e_idx(sp_e)).UAV_pos, N_UAV, 2);
         else
             leader_G1 = bestUAV;
             leader_G2 = bestUAV;
@@ -256,6 +303,65 @@ for iter = 2:params.FES_max
                 end
             end
         end
+    end
+
+    % 自适应权重旋转：每20代根据Pareto存档分布微调子种群权重方向
+    % 核心思想：找到前沿上最稀疏的区域，将最近的子种群权重朝该方向旋转
+    if params.enable_adaptive_weight && mod(iter, 20) == 0 && iter > 20 && iter < 0.8 * params.FES_max && length(pareto_archive) >= 10
+        arch_utils_aw = [pareto_archive.Utility];
+        arch_lats_aw = [pareto_archive.Latency];
+        arch_nrgs_aw = [pareto_archive.Energy];
+        n_arch_aw = length(pareto_archive);
+
+        % 归一化目标值到[0,1]
+        range_u_aw = max(arch_utils_aw) - min(arch_utils_aw); if range_u_aw < 1e-9, range_u_aw = 1; end
+        range_l_aw = max(arch_lats_aw) - min(arch_lats_aw); if range_l_aw < 1e-9, range_l_aw = 1; end
+        range_e_aw = max(arch_nrgs_aw) - min(arch_nrgs_aw); if range_e_aw < 1e-9, range_e_aw = 1; end
+
+        nu_aw = (arch_utils_aw - min(arch_utils_aw)) / range_u_aw;
+        nl_aw = (arch_lats_aw - min(arch_lats_aw)) / range_l_aw;
+        ne_aw = (arch_nrgs_aw - min(arch_nrgs_aw)) / range_e_aw;
+
+        % 计算每个解到最近邻的目标空间距离（拥挤度指标）
+        objs_aw = [nu_aw(:), nl_aw(:), ne_aw(:)];
+        crowd_aw = zeros(n_arch_aw, 1);
+        for ci = 1:n_arch_aw
+            d_aw = sqrt(sum((objs_aw - repmat(objs_aw(ci,:), n_arch_aw, 1)).^2, 2));
+            d_aw(ci) = inf;
+            crowd_aw(ci) = min(d_aw);
+        end
+
+        % 找到最稀疏的解
+        [~, sp_aw] = max(crowd_aw);
+
+        % 计算目标方向：稀疏解在"全最大化"空间中的方向
+        % Utility越高越好，Latency/Energy越低越好
+        target_dir = [nu_aw(sp_aw), 1 - nl_aw(sp_aw), 1 - ne_aw(sp_aw)];
+        target_dir = target_dir / sum(target_dir);
+
+        % 找到与目标方向最接近的子种群
+        min_d_aw = inf; closest_g_aw = 1;
+        for gi = 1:3
+            d_aw = norm(adaptive_weights(gi,:) - target_dir);
+            if d_aw < min_d_aw
+                min_d_aw = d_aw;
+                closest_g_aw = gi;
+            end
+        end
+
+        % 旋转强度随迭代递减
+        progress_aw = iter / params.FES_max;
+        alpha_aw = 0.1 * (1 - progress_aw)^1.5;
+
+        % 将最近子种群的权重朝目标方向旋转
+        adaptive_weights(closest_g_aw, :) = (1 - alpha_aw) * adaptive_weights(closest_g_aw, :) + alpha_aw * target_dir;
+
+        % 约束：每个权重在[0.05, 0.90]范围内，权重和为1
+        w_aw = adaptive_weights(closest_g_aw, :);
+        w_aw = max(0.05, min(0.90, w_aw));
+        adaptive_weights(closest_g_aw, :) = w_aw / sum(w_aw);
+
+        params.test_weights = adaptive_weights;
     end
 
     if params.enable_smart_stop && params.enable_early_stop && iter > 100
