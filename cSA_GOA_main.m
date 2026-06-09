@@ -77,7 +77,7 @@ actual_iter = params.FES_max;
 % 自适应权重初始化
 adaptive_weights = [0.70, 0.15, 0.15;
                     0.30, 0.50, 0.20;
-                    0.20, 0.15, 0.65];
+                    0.05, 0.10, 0.85];
 if ~isfield(params, 'enable_adaptive_weight')
     params.enable_adaptive_weight = true;
 end
@@ -370,7 +370,7 @@ for iter = 2:params.FES_max
 
         % 旋转强度随迭代递减
         progress_aw = iter / params.FES_max;
-        alpha_aw = 0.1 * (1 - progress_aw)^1.5;
+        alpha_aw = 0.03 * (1 - progress_aw)^1.5;
 
         % 将最近子种群的权重朝目标方向旋转
         adaptive_weights(closest_g_aw, :) = (1 - alpha_aw) * adaptive_weights(closest_g_aw, :) + alpha_aw * target_dir;
@@ -379,6 +379,14 @@ for iter = 2:params.FES_max
         w_aw = adaptive_weights(closest_g_aw, :);
         w_aw = max(0.05, min(0.90, w_aw));
         adaptive_weights(closest_g_aw, :) = w_aw / sum(w_aw);
+
+        % 关键约束：保护子种群专业化——每个子种群的主目标权重不能低于阈值
+        % G1主Utility(w1>=0.40), G2主Latency(w2>=0.30), G3主Energy(w3>=0.50)
+        min_primary = [0.40, 0.30, 0.50];
+        if adaptive_weights(closest_g_aw, closest_g_aw) < min_primary(closest_g_aw)
+            adaptive_weights(closest_g_aw, closest_g_aw) = min_primary(closest_g_aw);
+            adaptive_weights(closest_g_aw, :) = adaptive_weights(closest_g_aw, :) / sum(adaptive_weights(closest_g_aw, :));
+        end
 
         params.test_weights = adaptive_weights;
 

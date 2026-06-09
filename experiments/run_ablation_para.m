@@ -233,7 +233,7 @@ function [User, priorities, N_User, N_UAV, RRH, RRH_type, N_RRH, UAV_type, Ub, L
     params.cover_radius = 150;
     params.RRH_radius = 150;
     params.E_max = 50000;
-    params.energy_norm_max = 15000;
+    params.energy_norm_max = 80000;
     params.D_UU = 10;
     params.D_RU = 10;
     params.FES_max = 300;

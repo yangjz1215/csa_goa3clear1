@@ -22,7 +22,7 @@ function [fit, obj_utility, obj_latency, obj_energy] = calcFitness(uav_pos, User
 
     w1_def = [0.70, 0.15, 0.15];
     w2_def = [0.30, 0.50, 0.20];
-    w3_def = [0.20, 0.15, 0.65];
+    w3_def = [0.05, 0.10, 0.85];
 
     if isfield(params, 'test_weights')
         w1 = params.test_weights(g, 1);
