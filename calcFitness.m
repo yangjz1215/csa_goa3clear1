@@ -35,6 +35,11 @@ function [fit, obj_utility, obj_latency, obj_energy] = calcFitness(uav_pos, User
     norm_util = utility / max_utility;
     norm_lat = latency / max_latency;
     norm_energy = energy / max_energy;
+
+    % 关键修复：裁剪归一化值到[0,1]，防止energy超过energy_norm_max时适应度崩负
+    norm_util = min(1.0, max(0.0, norm_util));
+    norm_lat = min(1.0, max(0.0, norm_lat));
+    norm_energy = min(1.0, max(0.0, norm_energy));
     
     % 基础的多目标适应度 (最大化逻辑：效用越大越好，延迟/能耗越小越好)
     base_fit = w1 * norm_util + w2 * (1.0 - norm_lat) + w3 * (1.0 - norm_energy);

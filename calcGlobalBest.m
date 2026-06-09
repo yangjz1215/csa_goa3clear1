@@ -56,7 +56,7 @@ function global_best = calcGlobalBest(mem_matrix, G_weights, N_UAV, User, priori
         fit_norm = subpop_fits / max(max(subpop_fits), 1e-6);
         success_norm = subpop_success / max(max(subpop_success), 1e-6);
         dispersion_norm = subpop_dispersions / max(max(subpop_dispersions), 1e-6);
-        combined_scores = 0.6 * fit_norm + 0.4 * success_norm + 0.3 * dispersion_norm;
+        combined_scores = 0.6 * fit_norm + 0.3 * success_norm + 0.1 * dispersion_norm;
 
         [~, best_idx] = max(combined_scores);
         best_pos(g, :, :) = mem_matrix{g}(best_idx, :, :);

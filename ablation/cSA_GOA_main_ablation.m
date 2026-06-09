@@ -156,7 +156,8 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                             pos = goaVShape(subpops{g}, mem_ref_pos, t, X_init, X_mean_g, g);
                         end
                     else
-                        pos = X_init;
+                        % 关键修复：关闭排斥项，但保留基于原有解位置(mem_ref_pos)的高斯微调，维持基础搜索能力
+                        pos = mem_ref_pos + randn(1, 2) * mean(subpops{g}.sigma(:)) * t;
                     end
 
                     pos = projectToFeasiblePosition(pos, X_init, cand_i, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb);
@@ -174,15 +175,19 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 top_n = max(3, round(n_archive * top_pct));
 
                 % 拥挤度感知的Leader选择：从top-N中选择目标空间中最稀疏的解
+                % 关键修复：动态归一化消除量纲影响（Utility~百级, Latency~十级, Energy~万级）
                 [~, sort_u_idx] = sort(arch_utils, 'descend');
                 top_u_idx = sort_u_idx(1:top_n);
                 top_u_objs = zeros(top_n, 3);
                 for j = 1:top_n
                     top_u_objs(j, :) = [-arch_utils(top_u_idx(j)), arch_lats(top_u_idx(j)), arch_nrgs(top_u_idx(j))];
                 end
+                min_objs_u = min(top_u_objs, [], 1); max_objs_u = max(top_u_objs, [], 1);
+                range_objs_u = max_objs_u - min_objs_u; range_objs_u(range_objs_u < 1e-9) = 1;
+                norm_u_objs = (top_u_objs - repmat(min_objs_u, top_n, 1)) ./ repmat(range_objs_u, top_n, 1);
                 nn_dist_u = inf(top_n, 1);
                 for j = 1:top_n
-                    d = sqrt(sum((top_u_objs - repmat(top_u_objs(j,:), top_n, 1)).^2, 2));
+                    d = sqrt(sum((norm_u_objs - repmat(norm_u_objs(j,:), top_n, 1)).^2, 2));
                     d(j) = inf;
                     nn_dist_u(j) = min(d);
                 end
@@ -195,9 +200,12 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 for j = 1:top_n
                     top_l_objs(j, :) = [-arch_utils(top_l_idx(j)), arch_lats(top_l_idx(j)), arch_nrgs(top_l_idx(j))];
                 end
+                min_objs_l = min(top_l_objs, [], 1); max_objs_l = max(top_l_objs, [], 1);
+                range_objs_l = max_objs_l - min_objs_l; range_objs_l(range_objs_l < 1e-9) = 1;
+                norm_l_objs = (top_l_objs - repmat(min_objs_l, top_n, 1)) ./ repmat(range_objs_l, top_n, 1);
                 nn_dist_l = inf(top_n, 1);
                 for j = 1:top_n
-                    d = sqrt(sum((top_l_objs - repmat(top_l_objs(j,:), top_n, 1)).^2, 2));
+                    d = sqrt(sum((norm_l_objs - repmat(norm_l_objs(j,:), top_n, 1)).^2, 2));
                     d(j) = inf;
                     nn_dist_l(j) = min(d);
                 end
@@ -210,9 +218,12 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 for j = 1:top_n
                     top_e_objs(j, :) = [-arch_utils(top_e_idx(j)), arch_lats(top_e_idx(j)), arch_nrgs(top_e_idx(j))];
                 end
+                min_objs_e = min(top_e_objs, [], 1); max_objs_e = max(top_e_objs, [], 1);
+                range_objs_e = max_objs_e - min_objs_e; range_objs_e(range_objs_e < 1e-9) = 1;
+                norm_e_objs = (top_e_objs - repmat(min_objs_e, top_n, 1)) ./ repmat(range_objs_e, top_n, 1);
                 nn_dist_e = inf(top_n, 1);
                 for j = 1:top_n
-                    d = sqrt(sum((top_e_objs - repmat(top_e_objs(j,:), top_n, 1)).^2, 2));
+                    d = sqrt(sum((norm_e_objs - repmat(norm_e_objs(j,:), top_n, 1)).^2, 2));
                     d(j) = inf;
                     nn_dist_e(j) = min(d);
                 end
@@ -330,18 +341,28 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 crowd_aw(ci) = min(d_aw);
             end
 
-            [~, sp_aw] = max(crowd_aw);
-            target_dir = [nu_aw(sp_aw), 1 - nl_aw(sp_aw), 1 - ne_aw(sp_aw)];
-            target_dir = target_dir / sum(target_dir);
-
-            min_d_aw = inf; closest_g_aw = 1;
+            % 修复：不再朝最稀疏点旋转（极端点≠有价值方向）
+            % 改为：朝前沿覆盖最弱方向旋转
+            ideal_dirs = [1, 0, 0; 0, 1, 0; 0, 0, 1];
+            coverage_score = zeros(3, 1);
+            for di = 1:3
+                max_cos = 0;
+                for gi = 1:3
+                    cos_val = dot(adaptive_weights(gi,:), ideal_dirs(di,:)) / (norm(adaptive_weights(gi,:)) * norm(ideal_dirs(di,:)) + 1e-9);
+                    max_cos = max(max_cos, cos_val);
+                end
+                coverage_score(di) = max_cos;
+            end
+            [~, weakest_dir] = min(coverage_score);
+            max_dist = 0; closest_g_aw = 1;
             for gi = 1:3
-                d_aw = norm(adaptive_weights(gi,:) - target_dir);
-                if d_aw < min_d_aw
-                    min_d_aw = d_aw;
+                dist_val = 1 - dot(adaptive_weights(gi,:), ideal_dirs(weakest_dir,:)) / (norm(adaptive_weights(gi,:)) * norm(ideal_dirs(weakest_dir,:)) + 1e-9);
+                if dist_val > max_dist
+                    max_dist = dist_val;
                     closest_g_aw = gi;
                 end
             end
+            target_dir = ideal_dirs(weakest_dir,:);
 
             progress_aw = iter / params.FES_max;
             alpha_aw = 0.1 * (1 - progress_aw)^1.5;
@@ -352,6 +373,9 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
             adaptive_weights(closest_g_aw, :) = w_aw / sum(w_aw);
 
             params.test_weights = adaptive_weights;
+
+            % 关键修复：test_weights驱动calcFitness内的3维目标权重
+            % G_weights保持为子种群标量权重(1x3)，用于calcGlobalFitness加权求和，不应被3x3矩阵覆盖
         end
     end
 
