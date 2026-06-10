@@ -12,8 +12,8 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
     end
     params = configureAblationVariant(params, variant);
 
-    fprintf('[ABLATION] variant=%s | multi_subpop=%d | goa_turn=%d | goa_repulsion=%d | pareto_leader=%d\n', ...
-        variant, params.enable_multi_subpop, params.enable_goa_turn, params.enable_goa_repulsion, params.enable_pareto_leader);
+    fprintf('[ABLATION] variant=%s | multi_subpop=%d | goa_turn=%d | u_v_shape=%d | pareto_leader=%d\n', ...
+        variant, params.enable_multi_subpop, params.enable_goa_turn, params.enable_u_v_shape, params.enable_pareto_leader);
 
     subpops = initSubpopulations(N_UAV, User, RRH, priorities, params.subpop_params, Ub, Lb, params.cover_radius, params.D_RU);
 
@@ -104,10 +104,13 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
     mem_lats_cache = cell(n_subpops, 1);
     mem_nrgs_cache = cell(n_subpops, 1);
 
-    % 自适应权重初始化
-    adaptive_weights = [0.70, 0.15, 0.15;
-                        0.30, 0.50, 0.20;
-                        0.05, 0.10, 0.85];
+    % 核心改进4：能量归一化EMA动态机制
+    global_energy_max = params.energy_norm_max;
+
+    % 核心改进3：避免极端偏科的初始权重
+    adaptive_weights = [0.60, 0.20, 0.20;  % G1: 侧重Utility，兼顾时延和能耗
+                        0.25, 0.55, 0.20;  % G2: 侧重Latency
+                        0.15, 0.15, 0.70]; % G3: 侧重Energy
     if ~isfield(params, 'enable_adaptive_weight')
         params.enable_adaptive_weight = true;
     end
@@ -148,15 +151,16 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                     end
                     mem_ref_pos = mem_candidate(uav_idx, :);
 
-                    if params.enable_goa_repulsion
+                    if params.enable_u_v_shape
                         q_eff = params.subpop_params.q(g);
+                        progress = iter / params.FES_max;
                         if rand >= q_eff
-                            pos = goaUShape(subpops{g}, mem_ref_pos, t, X_init, g);
+                            pos = goaUShape(subpops{g}, mem_ref_pos, t, X_init, g, progress);
                         else
-                            pos = goaVShape(subpops{g}, mem_ref_pos, t, X_init, X_mean_g, g);
+                            pos = goaVShape(subpops{g}, mem_ref_pos, t, X_init, X_mean_g, g, progress);
                         end
                     else
-                        % 关键修复：关闭排斥项，但保留基于原有解位置(mem_ref_pos)的高斯微调，维持基础搜索能力
+                        % 关闭U/V-Shape探索，仅保留基于记忆位置的高斯微调
                         pos = mem_ref_pos + randn(1, 2) * mean(subpops{g}.sigma(:)) * t;
                     end
 
@@ -249,8 +253,9 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
 
                 if params.enable_goa_turn
                     cap_eff = capturability_g(g);
+                    enable_levy_flag = isfield(params, 'enable_levy_in_turn') && params.enable_levy_in_turn;
                     for uav_idx = 1:N_UAV
-                        pos = goaTurn(cand_i(uav_idx, :), global_leader(uav_idx, :), cap_eff, t);
+                        pos = goaTurn(cand_i(uav_idx, :), global_leader(uav_idx, :), cap_eff, t, enable_levy_flag);
                         pos = projectToFeasiblePosition(pos, cand_i(uav_idx, :), cand_i, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb);
                         cand_i(uav_idx, :) = pos(:)';
                     end
@@ -272,6 +277,20 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
                 E_remaining, params.E_max, params.k_move, g_eval, params.subpop_params, ...
                 N_UAV, params.cover_radius, RRH, capturability_g(g), N_RRH, RRH_type, UAV_type, params, ...
                 mem_fits_cache{g}, mem_utils_cache{g}, mem_lats_cache{g}, mem_nrgs_cache{g});
+        end
+
+        % 核心改进4：EMA动态更新能量归一化上限
+        if mod(iter, 10) == 0
+            curr_max_energy = 0;
+            for g = 1:n_subpops
+                if ~isempty(mem_nrgs_cache{g})
+                    curr_max_energy = max(curr_max_energy, max(mem_nrgs_cache{g}));
+                end
+            end
+            if curr_max_energy > 0
+                global_energy_max = 0.9 * global_energy_max + 0.1 * curr_max_energy;
+                params.energy_norm_max = global_energy_max;
+            end
         end
 
         local_mus = zeros(n_subpops, N_UAV, 2);
@@ -318,73 +337,8 @@ function [best_fit, bestUAV, cg_curve, energy_consumption, pareto_archive, best_
             end
         end
 
-        % 自适应权重旋转：每20代根据Pareto存档分布微调子种群权重方向
-        if params.enable_adaptive_weight && mod(iter, 20) == 0 && iter > 20 && iter < 0.8 * params.FES_max && length(pareto_archive) >= 10
-            arch_utils_aw = [pareto_archive.Utility];
-            arch_lats_aw = [pareto_archive.Latency];
-            arch_nrgs_aw = [pareto_archive.Energy];
-            n_arch_aw = length(pareto_archive);
-
-            range_u_aw = max(arch_utils_aw) - min(arch_utils_aw); if range_u_aw < 1e-9, range_u_aw = 1; end
-            range_l_aw = max(arch_lats_aw) - min(arch_lats_aw); if range_l_aw < 1e-9, range_l_aw = 1; end
-            range_e_aw = max(arch_nrgs_aw) - min(arch_nrgs_aw); if range_e_aw < 1e-9, range_e_aw = 1; end
-
-            nu_aw = (arch_utils_aw - min(arch_utils_aw)) / range_u_aw;
-            nl_aw = (arch_lats_aw - min(arch_lats_aw)) / range_l_aw;
-            ne_aw = (arch_nrgs_aw - min(arch_nrgs_aw)) / range_e_aw;
-
-            objs_aw = [nu_aw(:), nl_aw(:), ne_aw(:)];
-            crowd_aw = zeros(n_arch_aw, 1);
-            for ci = 1:n_arch_aw
-                d_aw = sqrt(sum((objs_aw - repmat(objs_aw(ci,:), n_arch_aw, 1)).^2, 2));
-                d_aw(ci) = inf;
-                crowd_aw(ci) = min(d_aw);
-            end
-
-            % 修复：不再朝最稀疏点旋转（极端点≠有价值方向）
-            % 改为：朝前沿覆盖最弱方向旋转
-            ideal_dirs = [1, 0, 0; 0, 1, 0; 0, 0, 1];
-            coverage_score = zeros(3, 1);
-            for di = 1:3
-                max_cos = 0;
-                for gi = 1:3
-                    cos_val = dot(adaptive_weights(gi,:), ideal_dirs(di,:)) / (norm(adaptive_weights(gi,:)) * norm(ideal_dirs(di,:)) + 1e-9);
-                    max_cos = max(max_cos, cos_val);
-                end
-                coverage_score(di) = max_cos;
-            end
-            [~, weakest_dir] = min(coverage_score);
-            max_dist = 0; closest_g_aw = 1;
-            for gi = 1:3
-                dist_val = 1 - dot(adaptive_weights(gi,:), ideal_dirs(weakest_dir,:)) / (norm(adaptive_weights(gi,:)) * norm(ideal_dirs(weakest_dir,:)) + 1e-9);
-                if dist_val > max_dist
-                    max_dist = dist_val;
-                    closest_g_aw = gi;
-                end
-            end
-            target_dir = ideal_dirs(weakest_dir,:);
-
-            progress_aw = iter / params.FES_max;
-            alpha_aw = 0.03 * (1 - progress_aw)^1.5;
-            adaptive_weights(closest_g_aw, :) = (1 - alpha_aw) * adaptive_weights(closest_g_aw, :) + alpha_aw * target_dir;
-
-            w_aw = adaptive_weights(closest_g_aw, :);
-            w_aw = max(0.05, min(0.90, w_aw));
-            adaptive_weights(closest_g_aw, :) = w_aw / sum(w_aw);
-
-            % 关键约束：保护子种群专业化——每个子种群的主目标权重不能低于阈值
-            % G1主Utility(w1>=0.40), G2主Latency(w2>=0.30), G3主Energy(w3>=0.50)
-            min_primary = [0.40, 0.30, 0.50];
-            if adaptive_weights(closest_g_aw, closest_g_aw) < min_primary(closest_g_aw)
-                adaptive_weights(closest_g_aw, closest_g_aw) = min_primary(closest_g_aw);
-                adaptive_weights(closest_g_aw, :) = adaptive_weights(closest_g_aw, :) / sum(adaptive_weights(closest_g_aw, :));
-            end
-
-            params.test_weights = adaptive_weights;
-
-            % 关键修复：test_weights驱动calcFitness内的3维目标权重
-            % G_weights保持为子种群标量权重(1x3)，用于calcGlobalFitness加权求和，不应被3x3矩阵覆盖
-        end
+        % 核心改进3：移除自适应权重机制（消融实验证明贡献为0%）
+        % 固定权重跑全程，减少不确定性，提升鲁棒性
     end
 
     [final_util, final_lat, final_nrg] = calcMEC_Objectives(bestUAV, User, priorities, params);
@@ -399,8 +353,9 @@ end
 function params = configureAblationVariant(params, variant)
     params.enable_multi_subpop = true;
     params.enable_goa_turn = true;
-    params.enable_goa_repulsion = true;
+    params.enable_u_v_shape = true;
     params.enable_pareto_leader = true;
+    params.enable_levy_in_turn = true; % 新增：控制Levy飞行
 
     switch variant
         case 'proposed'
@@ -408,14 +363,13 @@ function params = configureAblationVariant(params, variant)
         case {'no_subpop', 'no_multi_subpop'}
             params.enable_multi_subpop = false;
             params.enable_goa_turn = false;
-        case 'no_goa_turn'
-            params.enable_goa_turn = false;
-        case 'no_goa_repulsion'
-            params.enable_goa_repulsion = false;
+        case {'no_levy_turn', 'no_goa_turn'}
+            params.enable_goa_turn = true; % Turn仍开启，但关闭Levy
+            params.enable_levy_in_turn = false;
+        case {'no_u_v_shape', 'no_goa_repulsion'}
+            params.enable_u_v_shape = false;
         case {'no_pareto_leader', 'no_pareto'}
             params.enable_pareto_leader = false;
-        case 'no_adaptive_weight'
-            params.enable_adaptive_weight = false;
         otherwise
             error('Unknown ablation variant: %s', variant);
     end
@@ -480,40 +434,51 @@ function solution = selectKneeSolution(pareto_archive, fallback_uav, fallback_sc
     solution.Energy = pareto_archive(knee_idx).Energy;
 end
 
-function new_pos = goaUShape(subpop, mem_ref_pos, t, X_init, g)
-    r2 = 2 * pi * rand;
-    a_coeffs = [0.6, 0.7, 0.5];
+function new_pos = goaUShape(subpop, mem_ref_pos, t, X_init, g, progress)
+    c_step = 3.0 - 2.5 * progress;
+    r2 = rand;
+    a_coeffs = [0.2, 0.3, 0.1];
     A_g = (2 * rand - 1) * a_coeffs(g);
     sigma_mean = mean(subpop.sigma(:));
-    new_pos = X_init(:)' + 3 * cos(r2) * t * sigma_mean + A_g * (mem_ref_pos(:)' - X_init(:)');
+    new_pos = X_init(:)' + c_step * r2 * t * sigma_mean + A_g * (mem_ref_pos(:)' - X_init(:)');
 end
 
-function new_pos = goaVShape(subpop, mem_ref_pos, t, X_init, X_mean, g)
-    x = 2 * pi * rand;
-    if x < pi
-        V_x = -x / pi + 1;
-    else
-        V_x = x / pi - 1;
-    end
-    b_coeffs = [0.5, 0.6, 0.4];
+function new_pos = goaVShape(subpop, mem_ref_pos, t, X_init, X_mean, g, progress)
+    c_step = 3.0 - 2.5 * progress;
+    b_coeffs = [0.2, 0.3, 0.1];
     B_g = (2 * rand - 1) * b_coeffs(g);
     sigma_mean = mean(subpop.sigma(:));
-    new_pos = X_init(:)' + 3 * V_x * t * sigma_mean + B_g * (X_mean(:)' - X_init(:)');
+    new_pos = X_init(:)' + c_step * rand * t * sigma_mean + B_g * (X_mean(:)' - X_init(:)');
 end
 
-function new_pos = goaTurn(pos, global_best_uav, cap, t)
+function new_pos = goaTurn(pos, global_best_uav, cap, t, enable_levy)
     delta = cap * norm(pos - global_best_uav);
     delta_vec = global_best_uav(:)' - pos(:)';
     dist = norm(delta_vec);
+
     if dist > 1e-10
         direction = delta_vec / dist;
     else
         direction = zeros(1, 2);
     end
+
     theta = randn * 0.2;
     rot_matrix = [cos(theta), -sin(theta); sin(theta), cos(theta)];
     direction = direction * rot_matrix;
-    new_pos = pos(:)' + t * delta .* direction;
+
+    if enable_levy && rand < 0.3
+        beta = 1.5;
+        sigma = (gamma(1+beta)*sin(pi*beta/2)/(gamma((1+beta)/2)*beta*2^((beta-1)/2)))^(1/beta);
+        u = randn(1, 2) * sigma;
+        v = randn(1, 2);
+        levy_step = u ./ (abs(v).^(1/beta) + 1e-8);
+        levy_step = max(-50, min(50, levy_step));
+        new_pos = pos(:)' + max(0.1, t) * delta .* direction + levy_step;
+    else
+        min_step = 0.5;
+        move_dist = max(t * delta, min_step);
+        new_pos = pos(:)' + move_dist .* direction;
+    end
 end
 
 function pos = projectToFeasiblePosition(pos, fallback_pos, candidate_positions, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb)

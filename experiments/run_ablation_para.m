@@ -24,11 +24,10 @@ function results = run_ablation_para(varargin)
 
     variants = {
         'proposed',              'Proposed cSA-GOA (full)';
+        'no_levy_turn',          'w/o Levy-guided Turn';
+        'no_u_v_shape',          'w/o U/V-Shape Exploration';
         'no_subpop',             'w/o Multi-Subpopulation';
-        'no_goa_turn',           'w/o GOA Turn Operator';
-        'no_goa_repulsion',      'w/o GOA Repulsion (U/V-Shape)';
         'no_pareto_leader',      'w/o Dynamic Pareto Leader';
-        'no_adaptive_weight',    'w/o Adaptive Weight Rotation';
     };
     fprintf('消融实验: 变体共 %d 个\n', size(variants, 1));
 
@@ -233,7 +232,7 @@ function [User, priorities, N_User, N_UAV, RRH, RRH_type, N_RRH, UAV_type, Ub, L
     params.cover_radius = 150;
     params.RRH_radius = 150;
     params.E_max = 50000;
-    params.energy_norm_max = 80000;
+    params.energy_norm_max = 50000;
     params.D_UU = 10;
     params.D_RU = 10;
     params.FES_max = 300;

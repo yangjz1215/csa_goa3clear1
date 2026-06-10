@@ -74,10 +74,10 @@ fprintf('初始化完成：综合适应度=%.4f | 真实效用(优先级和)=%.1
 mo_stagnation_counter = 0;
 actual_iter = params.FES_max;
 
-% 自适应权重初始化
-adaptive_weights = [0.70, 0.15, 0.15;
-                    0.30, 0.50, 0.20;
-                    0.05, 0.10, 0.85];
+% 核心改进3：避免极端偏科的初始权重，兼顾各目标
+adaptive_weights = [0.60, 0.20, 0.20;  % G1: 侧重Utility，兼顾时延和能耗
+                    0.25, 0.55, 0.20;  % G2: 侧重Latency
+                    0.15, 0.15, 0.70]; % G3: 侧重Energy（0.85太极端）
 if ~isfield(params, 'enable_adaptive_weight')
     params.enable_adaptive_weight = true;
 end
@@ -88,6 +88,10 @@ mem_fits_cache = cell(3, 1);
 mem_utils_cache = cell(3, 1);
 mem_lats_cache = cell(3, 1);
 mem_nrgs_cache = cell(3, 1);
+
+% 核心改进4：能量归一化EMA动态机制
+% 初始基准值，后续平滑更新
+global_energy_max = params.energy_norm_max;
 
 for iter = 2:params.FES_max
     t = 1 - iter / params.FES_max;
@@ -126,10 +130,11 @@ for iter = 2:params.FES_max
                 mem_ref_pos = mem_candidate(uav_idx, :);
 
                 q_eff = params.subpop_params.q(g);
+                progress = iter / params.FES_max;
                 if rand >= q_eff
-                    pos = goaUShape(subpops{g}, mem_ref_pos, t, X_init, g);
+                    pos = goaUShape(subpops{g}, mem_ref_pos, t, X_init, g, progress);
                 else
-                    pos = goaVShape(subpops{g}, mem_ref_pos, t, X_init, X_mean_g, g);
+                    pos = goaVShape(subpops{g}, mem_ref_pos, t, X_init, X_mean_g, g, progress);
                 end
 
                 pos = projectToFeasiblePosition(pos, X_init, cand_i, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb);
@@ -224,7 +229,7 @@ for iter = 2:params.FES_max
                 end
 
                 cap_eff = capturability_g(g);
-                pos = goaTurn(cand_i(uav_idx, :), subpop_best_uav, cap_eff, t);
+                pos = goaTurn(cand_i(uav_idx, :), subpop_best_uav, cap_eff, t, true);
                 pos = projectToFeasiblePosition(pos, cand_i(uav_idx, :), cand_i, uav_idx, RRH, N_RRH, N_UAV, params, Ub, Lb);
                 candidates(i, uav_idx, :) = pos(:)';
             end
@@ -248,6 +253,21 @@ for iter = 2:params.FES_max
             E_remaining, params.E_max, params.k_move, g, params.subpop_params, ...
             N_UAV, params.cover_radius, RRH, capturability_g(g), N_RRH, RRH_type, UAV_type, params, ...
             mem_fits_cache{g}, mem_utils_cache{g}, mem_lats_cache{g}, mem_nrgs_cache{g});
+    end
+
+    % 核心改进4：EMA动态更新能量归一化上限
+    % 每10代更新一次，避免适应度剧烈振荡
+    if mod(iter, 10) == 0
+        curr_max_energy = 0;
+        for g = 1:3
+            if ~isempty(mem_nrgs_cache{g})
+                curr_max_energy = max(curr_max_energy, max(mem_nrgs_cache{g}));
+            end
+        end
+        if curr_max_energy > 0
+            global_energy_max = 0.9 * global_energy_max + 0.1 * curr_max_energy;
+            params.energy_norm_max = global_energy_max;
+        end
     end
 
     local_mus = zeros(3, N_UAV, 2);
@@ -316,83 +336,9 @@ for iter = 2:params.FES_max
     end
 
     % 自适应权重旋转：每20代根据Pareto存档分布微调子种群权重方向
-    % 核心思想：找到前沿上最稀疏的区域，将最近的子种群权重朝该方向旋转
-    if params.enable_adaptive_weight && mod(iter, 20) == 0 && iter > 20 && iter < 0.8 * params.FES_max && length(pareto_archive) >= 10
-        arch_utils_aw = [pareto_archive.Utility];
-        arch_lats_aw = [pareto_archive.Latency];
-        arch_nrgs_aw = [pareto_archive.Energy];
-        n_arch_aw = length(pareto_archive);
-
-        % 归一化目标值到[0,1]
-        range_u_aw = max(arch_utils_aw) - min(arch_utils_aw); if range_u_aw < 1e-9, range_u_aw = 1; end
-        range_l_aw = max(arch_lats_aw) - min(arch_lats_aw); if range_l_aw < 1e-9, range_l_aw = 1; end
-        range_e_aw = max(arch_nrgs_aw) - min(arch_nrgs_aw); if range_e_aw < 1e-9, range_e_aw = 1; end
-
-        nu_aw = (arch_utils_aw - min(arch_utils_aw)) / range_u_aw;
-        nl_aw = (arch_lats_aw - min(arch_lats_aw)) / range_l_aw;
-        ne_aw = (arch_nrgs_aw - min(arch_nrgs_aw)) / range_e_aw;
-
-        % 计算每个解到最近邻的目标空间距离（拥挤度指标）
-        objs_aw = [nu_aw(:), nl_aw(:), ne_aw(:)];
-        crowd_aw = zeros(n_arch_aw, 1);
-        for ci = 1:n_arch_aw
-            d_aw = sqrt(sum((objs_aw - repmat(objs_aw(ci,:), n_arch_aw, 1)).^2, 2));
-            d_aw(ci) = inf;
-            crowd_aw(ci) = min(d_aw);
-        end
-
-        % 修复：不再朝最稀疏点旋转（极端点≠有价值方向）
-        % 改为：计算当前3个子种群权重在目标空间中的覆盖盲区，朝盲区方向旋转
-        % 3个理想方向：G1=[1,0,0](Utility), G2=[0,1,0](anti-Latency), G3=[0,0,1](anti-Energy)
-        ideal_dirs = [1, 0, 0; 0, 1, 0; 0, 0, 1];
-        % 计算每个理想方向被当前子种群覆盖的程度（余弦相似度最大值）
-        coverage_score = zeros(3, 1);
-        for di = 1:3
-            max_cos = 0;
-            for gi = 1:3
-                cos_val = dot(adaptive_weights(gi,:), ideal_dirs(di,:)) / (norm(adaptive_weights(gi,:)) * norm(ideal_dirs(di,:)) + 1e-9);
-                max_cos = max(max_cos, cos_val);
-            end
-            coverage_score(di) = max_cos;
-        end
-        % 找到覆盖最弱的理想方向
-        [~, weakest_dir] = min(coverage_score);
-        % 找到离该理想方向最远的子种群（最适合被旋转过去）
-        max_dist = 0; closest_g_aw = 1;
-        for gi = 1:3
-            dist_val = 1 - dot(adaptive_weights(gi,:), ideal_dirs(weakest_dir,:)) / (norm(adaptive_weights(gi,:)) * norm(ideal_dirs(weakest_dir,:)) + 1e-9);
-            if dist_val > max_dist
-                max_dist = dist_val;
-                closest_g_aw = gi;
-            end
-        end
-        target_dir = ideal_dirs(weakest_dir,:);
-
-        % 旋转强度随迭代递减
-        progress_aw = iter / params.FES_max;
-        alpha_aw = 0.03 * (1 - progress_aw)^1.5;
-
-        % 将最近子种群的权重朝目标方向旋转
-        adaptive_weights(closest_g_aw, :) = (1 - alpha_aw) * adaptive_weights(closest_g_aw, :) + alpha_aw * target_dir;
-
-        % 约束：每个权重在[0.05, 0.90]范围内，权重和为1
-        w_aw = adaptive_weights(closest_g_aw, :);
-        w_aw = max(0.05, min(0.90, w_aw));
-        adaptive_weights(closest_g_aw, :) = w_aw / sum(w_aw);
-
-        % 关键约束：保护子种群专业化——每个子种群的主目标权重不能低于阈值
-        % G1主Utility(w1>=0.40), G2主Latency(w2>=0.30), G3主Energy(w3>=0.50)
-        min_primary = [0.40, 0.30, 0.50];
-        if adaptive_weights(closest_g_aw, closest_g_aw) < min_primary(closest_g_aw)
-            adaptive_weights(closest_g_aw, closest_g_aw) = min_primary(closest_g_aw);
-            adaptive_weights(closest_g_aw, :) = adaptive_weights(closest_g_aw, :) / sum(adaptive_weights(closest_g_aw, :));
-        end
-
-        params.test_weights = adaptive_weights;
-
-        % 关键修复：test_weights驱动calcFitness内的3维目标权重
-        % G_weights保持为子种群标量权重(1x3)，用于calcGlobalFitness加权求和，不应被3x3矩阵覆盖
-    end
+    % 核心改进3：移除自适应权重机制（消融实验证明贡献为0%）
+    % 固定权重跑全程，减少不确定性，提升鲁棒性
+    % 原自适应权重代码已移除，如需恢复请参考git历史
 
     if params.enable_smart_stop && params.enable_early_stop && iter > 100
         if pareto_updated_this_iter
@@ -516,38 +462,62 @@ function solution = selectMaxUtilitySolution(pareto_archive, fallback_uav, fallb
     end
 end
 
-function new_pos = goaUShape(subpop, mem_ref_pos, t, X_init, g)
-    r2 = 2 * pi * rand;
-    a_coeffs = [0.6, 0.7, 0.5];
+function new_pos = goaUShape(subpop, mem_ref_pos, t, X_init, g, progress)
+    % 核心改进1：动态步长系数c_step，从3.0衰减到0.5
+    % progress = iter/FES_max, 前期大步探索，后期小步精细收敛
+    c_step = 3.0 - 2.5 * progress;
+
+    r2 = rand; % 标准概率，避免cos(2*pi*rand)的强震荡
+    a_coeffs = [0.2, 0.3, 0.1]; % 降低排斥扰动幅度
     A_g = (2 * rand - 1) * a_coeffs(g);
     sigma_mean = mean(subpop.sigma(:));
-    new_pos = X_init(:)' + 3 * cos(r2) * t * sigma_mean + A_g * (mem_ref_pos(:)' - X_init(:)');
+
+    new_pos = X_init(:)' + c_step * r2 * t * sigma_mean + A_g * (mem_ref_pos(:)' - X_init(:)');
 end
 
-function new_pos = goaVShape(subpop, mem_ref_pos, t, X_init, X_mean, g)
-    x = 2 * pi * rand;
-    if x < pi
-        V_x = -x / pi + 1;
-    else
-        V_x = x / pi - 1;
-    end
-    b_coeffs = [0.5, 0.6, 0.4];
+function new_pos = goaVShape(subpop, mem_ref_pos, t, X_init, X_mean, g, progress)
+    % 核心改进1：动态步长系数c_step，从3.0衰减到0.5
+    c_step = 3.0 - 2.5 * progress;
+
+    b_coeffs = [0.2, 0.3, 0.1]; % 降低排斥扰动幅度
     B_g = (2 * rand - 1) * b_coeffs(g);
     sigma_mean = mean(subpop.sigma(:));
-    new_pos = X_init(:)' + 3 * V_x * t * sigma_mean + B_g * (X_mean(:)' - X_init(:)');
+
+    new_pos = X_init(:)' + c_step * rand * t * sigma_mean + B_g * (X_mean(:)' - X_init(:)');
 end
 
-function new_pos = goaTurn(pos, global_best_uav, cap, t)
+function new_pos = goaTurn(pos, global_best_uav, cap, t, enable_levy)
+    % 核心改进2：引入Levy飞行解决后期t->0的停滞 + 保底步长
     delta = cap * norm(pos - global_best_uav);
     delta_vec = global_best_uav(:)' - pos(:)';
     dist = norm(delta_vec);
+
     if dist > 1e-10
         direction = delta_vec / dist;
     else
         direction = zeros(1, 2);
     end
+
+    % 方向微调，增加多样性
     theta = randn * 0.2;
     rot_matrix = [cos(theta), -sin(theta); sin(theta), cos(theta)];
     direction = direction * rot_matrix;
-    new_pos = pos(:)' + t * delta .* direction;
+
+    if enable_levy && rand < 0.3 % 30%概率触发Levy变异
+        beta = 1.5;
+        sigma = (gamma(1+beta)*sin(pi*beta/2)/(gamma((1+beta)/2)*beta*2^((beta-1)/2)))^(1/beta);
+        u = randn(1, 2) * sigma;
+        v = randn(1, 2);
+        % Mantegna算法生成Levy步长，限制最大步长防止飞出边界
+        levy_step = u ./ (abs(v).^(1/beta) + 1e-8);
+        levy_step = max(-50, min(50, levy_step));
+
+        % 基础牵引 + Levy强扰动
+        new_pos = pos(:)' + max(0.1, t) * delta .* direction + levy_step;
+    else
+        % 保留最低移动量(min_step)，防止彻底停滞
+        min_step = 0.5;
+        move_dist = max(t * delta, min_step);
+        new_pos = pos(:)' + move_dist .* direction;
+    end
 end

@@ -40,9 +40,16 @@ for s = 1:length(scenes)
         fprintf('  Latest ablation file: %s\n', abl_files(idx(1)).name);
         try
             plot_ablation_all(latest_abl);
-            fprintf('   -> Ablation charts done\n\n');
+            fprintf('   -> Ablation charts done\n');
         catch ME
-            fprintf('   -> Error: %s\n\n', ME.message);
+            fprintf('   -> Error: %s\n', ME.message);
+        end
+
+        try
+            plot_ablation_knee(latest_abl);
+            fprintf('   -> Ablation knee point comparison done\n\n');
+        catch ME
+            fprintf('   -> Ablation knee point error: %s\n\n', ME.message);
         end
     else
         fprintf('  No ablation results found for %s scene\n\n', scene);

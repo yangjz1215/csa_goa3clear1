@@ -20,9 +20,9 @@ function [fit, obj_utility, obj_latency, obj_energy] = calcFitness(uav_pos, User
         max_energy = E_max * N_UAV;
     end
 
-    w1_def = [0.70, 0.15, 0.15];
-    w2_def = [0.30, 0.50, 0.20];
-    w3_def = [0.05, 0.10, 0.85];
+    w1_def = [0.60, 0.20, 0.20];
+    w2_def = [0.25, 0.55, 0.20];
+    w3_def = [0.15, 0.15, 0.70];
 
     if isfield(params, 'test_weights')
         w1 = params.test_weights(g, 1);
